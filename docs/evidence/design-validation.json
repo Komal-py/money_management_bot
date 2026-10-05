@@ -1,0 +1,10 @@
+{
+  "kind": "document_checks_not_application_tests",
+  "documents_checked": 6,
+  "requirements_count": 22,
+  "acceptance_requirements_count": 22,
+  "local_links_checked": 16,
+  "fictional_integer_money_examples": "passed",
+  "issues": [],
+  "status": "passed"
+}

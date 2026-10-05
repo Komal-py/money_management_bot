@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": 1,
+      "url": "https://docs.langchain.com/oss/python/langgraph/interrupts",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "When execution resumes",
+          "added": "2026-10-06"
+        },
+        {
+          "text": "the runtime restarts the entire node from the beginning",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "url": "https://docs.langchain.com/oss/python/langgraph/persistence",
+      "title": "",
+      "accessed": "2026-10-06"
+    },
+    {
+      "id": 3,
+      "url": "https://core.telegram.org/bots/api",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "An update is considered confirmed as soon as getUpdates is called with an offset higher than its update_id",
+          "added": "2026-10-06"
+        },
+        {
+          "text": "Data to be sent in a callback query to the bot when the button is pressed, 1-64 bytes",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "url": "https://hermes-agent.nousresearch.com/docs/user-guide/configuration",
+      "title": "",
+      "accessed": "2026-10-06"
+    },
+    {
+      "id": 5,
+      "url": "https://hermes-agent.nousresearch.com/docs/integrations/providers",
+      "title": "",
+      "accessed": "2026-10-06"
+    },
+    {
+      "id": 6,
+      "url": "https://docs.langchain.com/oss/python/langgraph/checkpointers",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "A checkpointer saves a snapshot of graph state at each super-step, organized into threads.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "url": "https://docs.langchain.com/oss/python/langgraph/durable-execution",
+      "title": "",
+      "accessed": "2026-10-06"
+    },
+    {
+      "id": 8,
+      "url": "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/responses?view=foundry-classic",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "API key authentication",
+          "added": "2026-10-06"
+        }
+      ]
+    }
+  ]
+}

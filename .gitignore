@@ -1,0 +1,30 @@
+# Local credentials and owner setup
+.env
+.env.*
+!.env.example
+.private/
+
+# Isolated worker state and evidence
+.coordination/
+.workers/
+.worktrees/
+artifacts/
+
+# Python/build/runtime output
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+*.log
+
+# Private data and backups
+*.dump
+*.backup
+*.db
+*.sqlite*
