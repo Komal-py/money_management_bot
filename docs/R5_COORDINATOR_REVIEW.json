@@ -1,0 +1,26 @@
+{
+  "scope": "Returned R5 verifier/CI/draft handoff",
+  "attempt": "r5-retry1",
+  "process": "proc_e12719cab1fd",
+  "worker_commit": "969bd9ca61708d81fae82b4cd36ddd5d0c69a7fe",
+  "worker_exit_code": 0,
+  "coordinator_reproduced": {
+    "synthetic_verifier_tests": 8,
+    "accounting_mode": {"status": "check-passed", "current_files": 33, "missing_expected": "tests/test_acceptance_release.py", "source_stable": true},
+    "stdout_resource_warning": "run_command leaves BufferedReader unclosed",
+    "real_offline_build_exit": 0,
+    "real_archive_check_passed": false,
+    "real_archive_reason": "Potential credential leakage in archive",
+    "archive_pattern_match_locations": ["docs/evidence/azure-responses.html", "tests/test_ai_provider.py", "tests/test_runtime.py", "tests/test_settings.py"],
+    "freeze_bug": "nested docs and .env.example changes are absent from fingerprint"
+  },
+  "independent_review": {
+    "passed": false,
+    "evidence": ".coordination/r5-independent-review.log",
+    "concerns": ["direct-child-only timeout and unclosed/incomplete stdout", "deliverable fingerprint omissions and docs output placement", "unnecessary read of unrelated owner environment secrets"],
+    "errors": ["real sdist synthetic/public sample literals trigger blanket credential regex", "non-strict xpasses not recorded/rejected", "temporary cleanup destroys failed node traces and rejected archives"]
+  },
+  "integration": "held pending focused repair deleg_733ab546, real artifact scan and fresh review",
+  "full_application_or_release_verified": false,
+  "live_calls_or_publication": false
+}
