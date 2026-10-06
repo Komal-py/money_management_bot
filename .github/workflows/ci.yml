@@ -1,0 +1,111 @@
+name: Integrated component checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: budget_test
+          POSTGRES_USER: budget_test
+          POSTGRES_PASSWORD: ci-only-disposable
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U budget_test -d budget_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # Disposable service credentials, never a production repository secret.
+      BUDGET_TEST_DATABASE_URL: postgresql+psycopg://budget_test:ci-only-disposable@localhost:5432/budget_test
+      PGOPTIONS: -c lock_timeout=5000 -c statement_timeout=15000 -c idle_in_transaction_session_timeout=20000
+      PYTHONPATH: src
+      AI_ENABLED: 'false'
+      UV_NO_ENV_FILE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.8.22'
+          enable-cache: true
+      - name: Install exactly locked dependencies
+        run: uv sync --locked --group dev --python 3.11
+      - name: Source lint
+        run: uv run --no-sync ruff check src tests
+      - name: Storage contract suite (fixture requires test_w2)
+        env:
+          BUDGET_TEST_SCHEMA: test_w2
+        run: uv run --no-sync pytest -p pytest_asyncio.plugin tests/test_storage.py -q
+      - name: Real integration (fixture explicitly uses test_integration)
+        env:
+          BUDGET_TEST_SCHEMA: test_integration
+        run: uv run --no-sync pytest -p pytest_asyncio.plugin tests/test_integration_store.py -q
+      - name: Independent acceptance (test_w8 only)
+        env:
+          BUDGET_TEST_SCHEMA: test_w8
+        run: uv run --no-sync pytest -p pytest_asyncio.plugin tests/test_acceptance_baseline.py tests/test_acceptance_release.py -q
+      - name: Onboarding and access (test_w3 only)
+        env:
+          BUDGET_TEST_SCHEMA: test_w3
+        run: uv run --no-sync pytest -p pytest_asyncio.plugin tests/test_onboarding.py -q
+      - name: AI contracts and controlled Responses SDK
+        env:
+          BUDGET_TEST_SCHEMA: test_w5
+        run: >-
+          uv run --no-sync pytest -p pytest_asyncio.plugin
+          tests/test_ai_contract.py tests/test_ai_hardening.py tests/test_ai_provider.py
+          tests/test_ai_rendering.py tests/test_ai_schema.py -q
+      - name: Durable workflows and real cross-worker seams (test_w6 only)
+        env:
+          BUDGET_TEST_SCHEMA: test_w6
+        run: >-
+          uv run --no-sync pytest -p pytest_asyncio.plugin
+          tests/test_workflow.py tests/test_workflow_integrated.py
+          tests/test_workflow_query_clarification.py tests/test_controller_integrated.py -q
+      - name: Durable Telegram transport (test_w4 only)
+        env:
+          BUDGET_TEST_SCHEMA: test_w4
+        run: >-
+          uv run --no-sync pytest -p pytest_asyncio.plugin
+          tests/test_telegram_commands.py tests/test_telegram_privacy.py tests/test_telegram_transport.py
+          tests/test_telegram_store_integration.py -q
+      - name: Reports and calendar components (test_w7 only)
+        env:
+          BUDGET_TEST_SCHEMA: test_w7
+        run: >-
+          uv run --no-sync pytest -p pytest_asyncio.plugin
+          tests/test_conversation.py tests/test_conversation_dependency_errors.py
+          tests/test_reports.py tests/test_reports_calendar.py tests/test_reports_integration.py -q
+      - name: Remaining financial core and controller tests (test_w2)
+        env:
+          BUDGET_TEST_SCHEMA: test_w2
+        run: >-
+          uv run --no-sync pytest -p pytest_asyncio.plugin
+          tests/test_storage_planner.py
+          tests/test_controller.py tests/test_controller_commands.py tests/test_controller_reports.py
+          tests/test_controller_ingress.py tests/test_controller_lifecycle.py tests/test_controller_setup_replay.py
+          tests/test_domain_dates.py tests/test_domain_money.py tests/test_domain_planner.py -q
+      - name: Startup and settings (test_w1 only)
+        env:
+          BUDGET_TEST_SCHEMA: test_w1
+        run: uv run --no-sync pytest -p pytest_asyncio.plugin tests/test_runtime.py tests/test_settings.py -q
+      - name: Build distribution (not runtime startup)
+        # PEP 517 installs the declared hatchling backend in a separate build env.
+        run: uv run --no-sync python -m build

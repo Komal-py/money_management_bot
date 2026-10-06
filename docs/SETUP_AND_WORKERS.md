@@ -2,15 +2,15 @@
 
 ## Current authorization
 
-The owner approved full implementation/testing, the proposed stack and HLD/LLD defaults, eight separate Hermes worker processes with session-only model/effort selection, bounded synthetic bot API checks using configured providers, and a push to `main` at `https://github.com/Komal-py/money_management_bot.git`. The owner explicitly approved creating `telegram_budget` and `telegram_budget_test`, project roles, and isolated schemas on the existing PostgreSQL server, with no unrelated changes or additional server/container. Connection details supplied: host `localhost`, port `5432`, maintenance database `postgres`, setup login `postgres`. The maintenance database is for setup connection only, not application storage. The owner now requires all setup inputs/permissions collected and verified first, then an explicit **start coding** request before any implementation worker/code starts. Local password/token entry, Telegram admin pairing and GitHub write authentication are still setup gates. Cached GitHub access can read the public target but the repository API reports no push permission; do not confuse public read access with write authority. Hosting/operational decisions remain separate. Do not treat credentials as permission to inspect unrelated data.
+The owner approved full implementation/testing, the proposed stack and HLD/LLD defaults, eight separate Hermes worker processes with session-only model/effort selection, bounded synthetic bot API checks using configured providers, and a push to `main` at `https://github.com/Komal-py/money_management_bot.git`. The owner explicitly approved creating `telegram_budget` and `telegram_budget_test`, project roles, and isolated schemas on the existing PostgreSQL server, with no unrelated changes or additional server/container. Connection details supplied: host `localhost`, port `5432`, maintenance database `postgres`, setup login `postgres`. The maintenance database is for setup connection only, not application storage. The requested setup-first checkpoint was completed before the explicit start-coding authorization: local secret entry, Telegram administrator pairing and project GitHub write-permission preflight passed. No actual push or full live-application acceptance is claimed. Hosting/operational decisions remain separate. Do not treat credentials as permission to inspect unrelated data.
 
-No implementation workers are running yet. This file is a delivery plan, not a claim of completed setup.
+Setup inputs and the start-coding gate were subsequently completed. The owner now explicitly requests **all eight workers concurrently**; that instruction supersedes the initial wave-based concurrency limit below. W1–W8 were launched in isolated worktrees with low/medium effort and 1800-second run budgets; all eight were verified running at startup. See `IMPLEMENTATION_STATUS.md` for verified implementation boundaries and the ignored `.coordination/parallel-run.json` for exact current handles. Current GitHub permission preflight passed; no push has occurred. Worker start is not proof of provider quota availability or completed features.
 
 ## Where the owner is needed
 
 | Boundary | Owner provides/approves | Coordinator handles |
 |---|---|---|
-| GitHub target | Approved `https://github.com/Komal-py/money_management_bot.git`, branch `main`; write authentication still unverified | Inspect only target repository, preserve existing work, commit/push without force, verify remote commit SHA |
+| GitHub target | Approved `https://github.com/Komal-py/money_management_bot.git`, branch `main`; write-permission preflight passed, push still pending | Inspect only target repository, preserve existing work, commit/push without force, verify remote commit SHA |
 | GitHub authentication | If existing Git Credential Manager cannot authenticate, complete browser/device login or enter a repository-scoped token locally | Check target read/write permission, configure project-scoped access as needed; no password/token in URLs or chat |
 | PostgreSQL connection | Host, port, login role, database names if already created, and password entered locally | Verify exact connection, discover only project-target privileges/objects, do not browse unrelated database contents |
 | PostgreSQL provisioning | Explicit permission to create `telegram_budget`, `telegram_budget_test`, project roles and `budget`/`workflow` schemas on the supplied existing server, OR supply isolated existing project databases | Create only approved resources, apply migrations, give each test worker isolated owned schema; no new server/container, no unrelated drops/changes |
@@ -25,7 +25,7 @@ The owner need not write code, design database tables, install Python libraries 
 
 Secrets are entered only into a restricted local ignored project file or supported credential manager. `.env` is plaintext, not an encrypted vault. Never print its values or copy it into worker worktrees, logs, test artifacts, GitHub or documents. Prepare exact local entry fields only after scope is known; preserve any existing settings.
 
-## Eight worker assignments — proposed, not dispatched
+## Eight worker assignments — concurrently dispatched
 
 The parent is the **coordinator**, additional to eight distinct worker roles. Before dispatch, the coordinator owns the shared typed contracts, project dependency lockfile, settings/bootstrap interfaces, file ownership map, test commands, and approved policy baseline.
 
@@ -46,8 +46,8 @@ Each worker also writes/runs its component tests; W8 is not a substitute for tes
 
 1. **Setup gate:** validate exact target repo/database/provider/Telegram permissions without unrelated access. Resolve proposed financial policies. Establish local Git and dependency environment.
 2. **Contract gate:** coordinator writes shared schemas/service contracts and freeze file ownership. Inputs, outputs, identifiers, errors, transaction ownership, sync/async behavior, and idempotency are explicit.
-3. **Foundation wave:** W1/W2/W5 and W8's initial harness/acceptance design work against frozen contracts. Launch at most two or three simultaneously initially; eight roles do not mean eight concurrent paid calls.
-4. **Integration wave:** after verifying relevant foundation outputs, W3/W4/W6/W7 receive the actual contracts and component revisions. Do not launch a task that must wait on an unpublished sibling interface.
+3. **Concurrent wave (owner amendment):** launch W1–W8 together from the verified coordinator baseline with disjoint source ownership, isolated schemas, session-only routes and bounded low/medium effort. Do not repeat completed slices needlessly; assign concrete hardening/integration work where implementation exists.
+4. **Dependency handling:** each worker uses the baseline and frozen contracts immediately. Missing sibling adapters use controlled injection or a narrow local fallback, with gaps reported to the coordinator; no waiting on unpublished sibling work.
 5. **Assembly gate:** parent connects the real modules and corrects contract drift; component workers run targeted suites only. Shared settings/lockfiles/migrations are edited only by the named owner.
 6. **Frozen verification gate:** stop source edits, run complete real-db/graph/transport suite with machine-readable evidence, lint and build. W8 reviews concrete frozen paths; changes require a new final run.
 7. **Live gate:** authorized synthetic provider calls and dedicated Telegram walkthrough, with explicit limits and fictional records. No owner money entered from inferred past values.

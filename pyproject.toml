@@ -30,6 +30,22 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/budget_bot"]
 
+[tool.hatch.build.targets.sdist]
+# Root-anchored Git-style patterns; bare filenames match nested copies too.
+include = [
+  "/src/budget_bot",
+  "/tests",
+  "/docs",
+  "/alembic",
+  "/README.md",
+  "/pyproject.toml",
+  "/uv.lock",
+  "/alembic.ini",
+  "/config.example.toml",
+  "/.env.example",
+]
+exclude = ["/.worktrees", "/.private", "/.coordination", "/.env"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
