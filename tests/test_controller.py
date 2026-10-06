@@ -66,7 +66,8 @@ class Workflow:
 async def test_financial_command_only_submits_review():
     from budget_bot.controller import BudgetController
     workflow = Workflow()
-    parse = lambda *_: {'kind': 'mutation', 'actions': [{'type': 'income', 'amount_inr': '100'}]}
+    def parse(*_):
+        return {'kind': 'mutation', 'actions': [{'type': 'income', 'amount_inr': '100'}]}
     controller = BudgetController(Store(), workflow, None, None, None, command_parser=parse)
     replies = await controller.handle(message(text='/income 100 Salary'), NOW)
     assert replies[0]['text'] == 'Review required'

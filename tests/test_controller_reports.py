@@ -13,7 +13,8 @@ class Reports:
 @pytest.mark.asyncio
 async def test_balance_query_uses_trusted_owner_only():
     from budget_bot.controller import BudgetController
-    parser = lambda *_: {'kind': 'query', 'query': {'report': 'balances'}}
+    def parser(*_):
+        return {'kind': 'query', 'query': {'report': 'balances'}}
     controller = BudgetController(Store(), Workflow(), None, Reports(), None, command_parser=parser)
     output = await controller.handle(message(text='/balance'), NOW)
     assert output[0]['text'] == 'Pool: ₹100.00'
@@ -23,7 +24,8 @@ async def test_balance_query_uses_trusted_owner_only():
 async def test_spending_query_is_read_only():
     from budget_bot.controller import BudgetController
     workflow = Workflow()
-    parser = lambda *_: {'kind': 'query', 'query': {'report': 'spending', 'period': 'month'}}
+    def parser(*_):
+        return {'kind': 'query', 'query': {'report': 'spending', 'period': 'month'}}
     controller = BudgetController(Store(), workflow, None, Reports(), None, command_parser=parser)
     output = await controller.handle(message(text='/spending month'), NOW)
     assert output[0]['text'] == 'Spending: ₹20.00'

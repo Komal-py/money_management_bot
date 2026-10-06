@@ -38,6 +38,8 @@ No cloud deployment was performed or verified. A future laptop-hosted process on
 
 Durable receive records precede polling offsets; transient handler failures retain pending work. Outbox leases retry failed delivery. Remote-send success followed by local failure can duplicate replies (at-least-once delivery); financial request replay is separately guarded by storage. Stop gracefully with the future stop event and close resources. Do not delete pending inbox/outbox to recover a transient outage or manually rewrite balances/history.
 
+Coordinator integration now scopes inbox handling, completion and outbox claims to the active bot. Within equal due_at values, claims order by bot/update/reply position before UUID; sequential delivery preserves position across the 20-item claim boundary. Retry/backoff changes due_at and can reorder parts, and simultaneous transports can reorder sends. This is not a global exactly-once/strict-order delivery guarantee. Run one active poller for the initial single-bot project schema.
+
 Protect PostgreSQL access and backups: bot owner isolation is not protection from the database operator. Backup/restore, retention, logging destination, supervisor and cloud hosting remain operational decisions, not executed checks. Do not run destructive migration downgrade or synthetic test cleanup against application schemas.
 
 ## Local verification limits

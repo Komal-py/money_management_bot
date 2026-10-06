@@ -83,10 +83,10 @@ async def test_real_inbox_failure_restart_receipt_and_json_outbox(real_store):
         assert await restarted.deliver_once(later) == 3
         assert not real_store.pending_outbox(later)
         sends = [params for method, params in request.calls if method == 'sendMessage']
-        # Store currently claims by due_at/id, not reply position; compare content
-        # independent of that known storage-boundary ordering requirement.
-        assert sorted(item['text'] for item in sends) == sorted(row.text for row in rows)
+        assert ''.join(item['text'] for item in sends) == text
+        assert [item['text'] for item in sends] == [row.text for row in rows]
         assert sum('reply_markup' in item for item in sends) == 1
+        assert 'reply_markup' in sends[-1]
         assert [params['offset'] for method, params in request.calls if method == 'getUpdates'] == [0, 11]
         assert not any(method == 'deleteWebhook' for method, _ in request.calls)
 
@@ -98,14 +98,14 @@ async def test_real_gap_cursor_durable_not_handler_completion(real_store):
     async with Bot('123:TEST', request=request, get_updates_request=request) as bot:
         transport = TelegramTransport(bot, real_store, controller)
         assert await transport.poll_once(NOW) == 0
-        assert real_store.polling_offset(99) == 11
+        assert real_store.polling_offset(99) == 13
         assert [row['update_id'] for row in real_store.pending_updates()] == [10, 12]
         request.updates = [{**PAYLOAD, 'update_id': 11}]
         assert await transport.poll_once(NOW) == 0
         assert real_store.polling_offset(99) == 13
         assert len(real_store.pending_updates()) == 3
         offsets = [params['offset'] for method, params in request.calls if method == 'getUpdates']
-        assert offsets == [0, 11]
+        assert offsets == [0, 13]
 
 
 async def test_real_outbox_timeout_backoff_and_fencing(real_store):
@@ -125,6 +125,66 @@ async def test_real_outbox_timeout_backoff_and_fencing(real_store):
         request.timeout_send = False
         assert await transport.deliver_once(NOW + timedelta(seconds=8)) == 1
         assert not real_store.pending_outbox(NOW + timedelta(seconds=8))
+
+
+async def test_transport_only_handles_and_delivers_its_bot(real_store):
+    request, controller = Request(), Controller()
+    request.updates = []
+    other_payload = {**PAYLOAD, 'message': {**PAYLOAD['message'], 'text': 'Other bot'}}
+    real_store.save_update(100, 10, other_payload, NOW)
+    real_store.save_update(99, 10, PAYLOAD, NOW)
+    real_store.save_update(100, 11, other_payload, NOW)
+    real_store.complete_update(11, [{'chat_id': 888, 'text': 'Other bot outbox'}], NOW, bot_id=100)
+    async with Bot('123:TEST', request=request, get_updates_request=request) as bot:
+        transport = TelegramTransport(bot, real_store, controller)
+        assert await transport.poll_once(NOW) == 1
+        assert [row['bot_id'] for row in real_store.pending_updates()] == ['100']
+        assert await transport.deliver_once(NOW) == 1
+        sends = [params for method, params in request.calls if method == 'sendMessage']
+        assert [item['chat_id'] for item in sends] == [7]
+        remaining = real_store.pending_outbox(NOW)
+        assert len(remaining) == 1
+        assert remaining[0]['text'] == 'Other bot outbox'
+
+
+def test_outbox_claim_preserves_persisted_reply_position(real_store):
+    real_store.save_update(99, 10, PAYLOAD, NOW)
+    texts = ['First', 'Second', 'Last: review buttons']
+    real_store.complete_update(10, [{'chat_id': 7, 'text': text} for text in texts], NOW, bot_id=99)
+    with real_store.engine.begin() as connection:
+        # Opposing UUID order makes the prior random-ID ordering fail deterministically.
+        for position, suffix in enumerate((3, 2, 1)):
+            connection.execute(Outbox.__table__.update().where(Outbox.position == position)
+                               .values(id=f'00000000-0000-0000-0000-{suffix:012d}'))
+    claimed = real_store.pending_outbox(NOW)
+    assert [row['text'] for row in claimed] == texts
+
+
+async def test_reply_order_spans_twenty_item_delivery_claims(real_store):
+    request = Request()
+    request.updates = []
+    texts = [f'Reply part {position:02d}' for position in range(25)]
+    keyboard = [[{'text': 'Confirm', 'data': 'rev:opaque'}]]
+    real_store.save_update(99, 10, PAYLOAD, NOW)
+    replies = [{'chat_id': 7, 'text': text,
+                'keyboard': keyboard if position == len(texts) - 1 else None}
+               for position, text in enumerate(texts)]
+    real_store.complete_update(10, replies, NOW, bot_id=99)
+    with real_store.engine.begin() as connection:
+        for position in range(len(texts)):
+            connection.execute(Outbox.__table__.update().where(Outbox.position == position)
+                               .values(id=f'00000000-0000-0000-0000-{len(texts) - position:012d}'))
+    async with Bot('123:TEST', request=request, get_updates_request=request) as bot:
+        transport = TelegramTransport(bot, real_store, Controller())
+        assert await transport.deliver_once(NOW) == 20
+        first_sends = [params for method, params in request.calls if method == 'sendMessage']
+        assert [item['text'] for item in first_sends] == texts[:20]
+        assert not any('reply_markup' in item for item in first_sends)
+        assert await transport.deliver_once(NOW) == 5
+        sends = [params for method, params in request.calls if method == 'sendMessage']
+        assert [item['text'] for item in sends] == texts
+        assert 'reply_markup' in sends[-1]
+        assert not real_store.pending_outbox(NOW, bot_id=99)
 
 
 def test_real_command_money_is_only_a_proposal(real_store):

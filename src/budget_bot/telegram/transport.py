@@ -90,7 +90,7 @@ class TelegramTransport:
         for update in updates:
             self.store.save_update(self.bot.id, update.update_id, update.to_dict(), now)
         completed = 0
-        for record in self.store.pending_updates(limit=100):
+        for record in self.store.pending_updates(limit=100, bot_id=self.bot.id):
             try:
                 payload = record['payload']
                 received_at = record.get('received_at', now)
@@ -108,7 +108,8 @@ class TelegramTransport:
                     except (TelegramError, TimeoutError):
                         logger.warning('Callback answer failed; continuing durable handling')
                 replies = await self.controller.handle(payload, received_at)
-                self.store.complete_update(record['update_id'], _durable_replies(replies), now)
+                self.store.complete_update(record['update_id'], _durable_replies(replies), now,
+                                           bot_id=self.bot.id)
             except Exception:
                 # Do not include exception text, updates, token, or financial data.
                 logger.warning('Inbox handling failed; update retained')
@@ -124,7 +125,7 @@ class TelegramTransport:
         the next send may repeat a remotely delivered message (at-least-once).
         """
         delivered = 0
-        for item in self.store.pending_outbox(now, limit=20):
+        for item in self.store.pending_outbox(now, limit=20, bot_id=self.bot.id):
             try:
                 # Older durable records may predate ingress splitting. Replay of
                 # such a record is at-least-once for the entire chunk sequence.

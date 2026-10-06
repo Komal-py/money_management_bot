@@ -62,16 +62,16 @@ class Store:
         self.events.append(('save', update_id))
         self.inbox.setdefault(update_id, {'update_id': update_id, 'payload': payload})
 
-    def pending_updates(self, limit=100):
+    def pending_updates(self, limit=100, *, bot_id=None):
         return [record for key, record in self.inbox.items() if key not in self.completed][:limit]
 
-    def complete_update(self, update_id, replies, now):
+    def complete_update(self, update_id, replies, now, *, bot_id=None):
         self.events.append(('complete', update_id))
         self.completed.add(update_id)
         for reply in replies:
             self.outbox.append({'id': len(self.outbox) + 1, 'lease_token': 'lease-1', **reply})
 
-    def pending_outbox(self, now, limit=20):
+    def pending_outbox(self, now, limit=20, *, bot_id=None):
         return self.outbox[:limit]
 
     def ack_outbox(self, id, lease_token, now):

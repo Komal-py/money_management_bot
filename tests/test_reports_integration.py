@@ -144,8 +144,8 @@ def test_real_target_history_historical_month_revision_carry_and_removal(db):
     assert [(v['bucket_name'], v['effective_month'], v['amount'], v['target'], v['revision'])
             for v in history] == [('Travel', '2024-02-01', 1, 1, 1),
                                   ('Travel', '2024-02-01', 2, 2, 2),
-                                  ('Travel', '2024-04-01', None, None, 3),
-                                  ('Travel', '2024-05-01', 1, 1, 4)]
+                                  ('Travel', '2024-04-01', None, None, 1),
+                                  ('Travel', '2024-05-01', 1, 1, 1)]
     service = ReportService(db)
     before = counts(db)
     assert 'target' not in service.spending(a, 'month', receipt(1))

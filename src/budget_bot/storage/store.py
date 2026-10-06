@@ -531,12 +531,16 @@ class BudgetStore:
             cursor = s.get(Cursor, str(bot_id))
             return cursor.next_offset if cursor else 0
 
-    def pending_outbox(self, now, limit=20):
+    def pending_outbox(self, now, limit=20, *, bot_id=None):
         now = aware(now)
         with Session(self.engine) as s, s.begin():
-            rows = s.scalars(select(Outbox).where(Outbox.delivered_at.is_(None), Outbox.due_at <= now,
-                                                  or_(Outbox.lease_until.is_(None), Outbox.lease_until <= now))
-                             .order_by(Outbox.due_at, Outbox.id).limit(limit)
+            query = select(Outbox).where(Outbox.delivered_at.is_(None), Outbox.due_at <= now,
+                                         or_(Outbox.lease_until.is_(None), Outbox.lease_until <= now))
+            if bot_id is not None:
+                query = query.where(Outbox.bot_id == str(bot_id))
+            rows = s.scalars(query
+                             .order_by(Outbox.due_at, Outbox.bot_id, Outbox.update_id, Outbox.position, Outbox.id)
+                             .limit(limit)
                              .with_for_update(skip_locked=True)).all()
             result = []
             for row in rows:
