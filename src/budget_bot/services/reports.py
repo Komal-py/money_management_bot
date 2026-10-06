@@ -1,8 +1,4 @@
-"""Deterministic read-only views of owner-scoped store facts.
-
-Money is formatted using integer operations while W1's external money module is
-not yet present. No inferred ledger or target-history calculations live here.
-"""
+"""Deterministic read-only views of owner-scoped store facts."""
 import calendar
 import re
 from datetime import date, timedelta
@@ -10,6 +6,8 @@ from zoneinfo import ZoneInfo
 
 
 def _money(paise):
+    # Domain formatting puts the minus after ₹; retain this view's established
+    # -₹ spelling and strict integer-only boundary without float conversion.
     if isinstance(paise, bool) or not isinstance(paise, int):
         raise ValueError('Money must be integer paise.')
     whole, fraction = divmod(abs(paise), 100)
@@ -86,12 +84,14 @@ class ReportService:
         bucket = _bucket(snapshot, bucket_name)
         result = self.store.spending(owner_id, first, last, bucket)
         text = _summary(result)
-        # Snapshot targets are current settings, not historical target facts.
-        # Only compare a receipt-anchored current full month; never retrofit a
-        # current target onto historical days or ranges.
+        # Current bucket settings are not historical facts. A missing prior
+        # version means no target; an explicit removal must stop carry-forward.
         if period == 'month':
             for name in sorted(result['by_bucket'], key=lambda name: (name.casefold(), name)):
-                target = snapshot['buckets'][name]['target']
+                versions = [v for v in snapshot['targets']
+                            if v['bucket_name'] == name and v['effective_month'] <= first.isoformat()]
+                version = max(versions, key=lambda v: (v['effective_month'], v['revision']), default=None)
+                target = version['amount'] if version is not None else None
                 amount = result['by_bucket'][name]
                 if target is not None and amount >= target:
                     text += (f'\nWarning: {name} monthly spending {_money(amount)} '

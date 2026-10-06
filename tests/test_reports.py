@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from budget_bot.services.reports import ReportService
+from budget_bot.services.reports import ReportService, _money
 
 
 class StoreDouble:
@@ -111,11 +111,15 @@ def test_naive_receipt_rejected():
 
 def test_current_month_target_warning_not_applied_to_historical_range():
     store = StoreDouble()
+    store.snapshot['targets'] = [{'bucket_name': 'Travel', 'effective_month': '2024-03-01',
+                                  'amount': 200, 'target': 200, 'revision': 1}]
     service = ReportService(store)
     receipt = datetime(2024, 3, 2, tzinfo=timezone.utc)
     text = service.spending('owner-a', 'month', receipt)
     assert 'Warning: Travel monthly spending ₹2.01 reached or exceeded target ₹2.00.' in text
     store.snapshot['buckets']['Travel']['target'] = 201
+    store.snapshot['targets'].append({'bucket_name': 'Travel', 'effective_month': '2024-03-01',
+                                      'amount': 201, 'target': 201, 'revision': 2})
     assert 'reached or exceeded' in service.spending('owner-a', 'month', receipt)
     assert 'target' not in service.spending('owner-a', 'range', receipt, '2024-03-01', '2024-03-01')
 
@@ -125,3 +129,19 @@ def test_timezone_week_crosses_year_and_does_not_use_wall_clock():
     store.snapshot['timezone'] = 'America/Los_Angeles'
     ReportService(store).spending('owner-a', 'week', datetime(2024, 1, 1, 1, tzinfo=timezone.utc))
     assert ('spending', 'owner-a', date(2023, 12, 25), date(2023, 12, 31), None) in store.calls
+
+
+@pytest.mark.parametrize(('paise', 'expected'), [
+    (-101, '-₹1.01'), (-100, '-₹1.00'), (-99, '-₹0.99'), (-1, '-₹0.01'),
+    (0, '₹0.00'), (1, '₹0.01'), (99, '₹0.99'), (100, '₹1.00'),
+    (9007199254740993, '₹90071992547409.93'),
+    (-9223372036854775808, '-₹92233720368547758.08'),
+])
+def test_integer_money_boundaries(paise, expected):
+    assert _money(paise) == expected
+
+
+@pytest.mark.parametrize('paise', [True, False, 0.001, -0.001, 1.0, '1', None])
+def test_money_never_coerces_or_rounds_subpaise(paise):
+    with pytest.raises(ValueError):
+        _money(paise)
