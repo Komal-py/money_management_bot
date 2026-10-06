@@ -10,6 +10,9 @@ class BudgetController:
         self.onboarding = onboarding
         self.reports = reports
         self.access = access
+        if command_parser is None:
+            from budget_bot.telegram.commands import parse_command
+            command_parser = parse_command
         self.command_parser = command_parser
 
     @staticmethod
@@ -48,7 +51,21 @@ class BudgetController:
         text = message.get('text', '')
         received = datetime.fromtimestamp(message.get('date', int(now.timestamp())), timezone.utc)
         if text.startswith('/') and self.command_parser:
-            command = self.command_parser(text, received, user['timezone'])
+            from budget_bot.telegram.commands import CommandError, HELP_TEXT
+            try:
+                command = self.command_parser(text, received, user['timezone'])
+            except CommandError as error:
+                return self._reply(chat['id'], error.message + '\nSee /help for syntax.')
+            if command['kind'] == 'help':
+                return self._reply(chat['id'], HELP_TEXT)
             if command['kind'] == 'mutation':
                 return self._reply(chat['id'], await self.workflow.submit(owner, command['actions'], received))
+            if command['kind'] == 'query':
+                query = command['query']
+                if query['report'] == 'balances':
+                    return self._reply(chat['id'], self.reports.balances(owner))
+                if query['report'] == 'spending':
+                    return self._reply(chat['id'], self.reports.spending(
+                        owner, query.get('period', 'month'), received,
+                        start=query.get('start'), end=query.get('end'), bucket_name=query.get('bucket_name')))
         return self._reply(chat['id'], 'Use /help for commands. All money changes require review and confirmation.')

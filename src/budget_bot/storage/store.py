@@ -135,8 +135,10 @@ class BudgetStore:
                 'buckets': {a.name: {'id': a.id, 'balance': a.balance, 'target': a.target}
                             for a in accounts if a.kind == 'bucket'},
                 'transactions': [copy.deepcopy(t.current) for t in transactions],
-                'targets': [{'id': t.id, 'bucket_id': t.bucket_id, 'effective_month': t.effective_month.isoformat(),
-                             'target': t.target, 'revision': t.revision} for t in targets]}
+                'targets': [{'id': t.id, 'bucket_id': t.bucket_id,
+                             'bucket_name': next(a.name for a in accounts if a.id == t.bucket_id),
+                             'effective_month': t.effective_month.isoformat(),
+                             'target': t.target, 'amount': t.target, 'revision': t.revision} for t in targets]}
 
     def get_snapshot(self, owner_id):
         # Lock gives a consistent multi-table snapshot at READ COMMITTED.
@@ -307,6 +309,9 @@ class BudgetStore:
             remap[fresh['id']] = old['id']
             if fresh.get('batch_id') and old.get('batch_id'):
                 remap[fresh['batch_id']] = old['batch_id']
+        for fresh, old in zip(proposed.get('metadata', []), previous.get('metadata', [])):
+            if fresh.get('type') == old.get('type') and fresh.get('id') and old.get('id'):
+                remap[fresh['id']] = old['id']
         for name, bucket in proposed['snapshot']['buckets'].items():
             prior = previous['snapshot']['buckets'].get(name)
             if prior:
