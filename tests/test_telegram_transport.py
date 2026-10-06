@@ -1,5 +1,6 @@
 import json
-from datetime import datetime, timezone
+import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from telegram import Bot, InlineKeyboardMarkup
@@ -221,3 +222,109 @@ async def test_run_stops_without_bot_startup(boundary):
     stop.set()
     await transport.run(stop)
     assert [name for name, _ in request.calls] == ['getMe']
+
+
+async def test_receipt_timestamp_survives_restart(boundary):
+    transport, request, store, controller = boundary
+    store.save_update(99, 10, PAYLOAD, NOW)
+    store.inbox[10]['received_at'] = NOW.isoformat()
+    request.updates = []
+    receipts = []
+
+    async def handle(payload, received_at):
+        receipts.append(received_at)
+        return []
+
+    controller.handle = handle
+    restarted = TelegramTransport(transport.bot, store, controller)
+    assert await restarted.poll_once(NOW + timedelta(days=1)) == 1
+    assert receipts == [NOW]
+
+
+async def test_json_keyboard_callback_data_list(boundary):
+    transport, request, store, _ = boundary
+    store.outbox = [{'id': 1, 'lease_token': 'lease', 'chat_id': 7,
+                     'text': 'Review', 'keyboard': [[{'text': 'Confirm', 'callback_data': 'rev:opaque'}]]}]
+    assert await transport.deliver_once(NOW) == 1
+    assert request.calls[-1][1]['reply_markup']['inline_keyboard'][0][0]['callback_data'] == 'rev:opaque'
+
+
+async def test_callback_ack_is_bounded(boundary, monkeypatch):
+    transport, request, store, _ = boundary
+    request.updates = [{'update_id': 11, 'callback_query': {'id': 'callback-id', 'from': {'id': 7, 'is_bot': False, 'first_name': 'User'}, 'chat_instance': 'abc'}}]
+
+    async def hangs(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(type(transport.bot), 'answer_callback_query', hangs)
+    monkeypatch.setattr('budget_bot.telegram.transport.CALLBACK_ACK_TIMEOUT', 0.01, raising=False)
+    assert await asyncio.wait_for(transport.poll_once(NOW), 0.5) == 1
+    assert not store.pending_updates()
+
+
+async def test_long_reply_is_durably_split_with_keyboard_on_last(boundary):
+    transport, request, store, controller = boundary
+    text = '₹😀' * 3000
+    keyboard = [[{'text': 'Confirm', 'data': 'rev:opaque'}]]
+
+    async def handle(payload, received_at):
+        return [{'chat_id': 7, 'text': text, 'keyboard': keyboard}]
+
+    controller.handle = handle
+    assert await transport.poll_once(NOW) == 1
+    assert len(store.outbox) > 1
+    assert ''.join(item['text'] for item in store.outbox) == text
+    assert all(len(item['text'].encode('utf-16-le')) // 2 <= 4096 for item in store.outbox)
+    assert all(not item['keyboard'] for item in store.outbox[:-1])
+    assert store.outbox[-1]['keyboard'] == keyboard
+
+
+async def test_rejected_ack_is_not_counted(boundary, monkeypatch):
+    transport, _, store, _ = boundary
+    await transport.poll_once(NOW)
+    monkeypatch.setattr(store, 'ack_outbox', lambda *args: False)
+    assert await transport.deliver_once(NOW) == 0
+
+
+async def test_malformed_inbox_record_retained_without_blocking_next(boundary):
+    transport, request, store, _ = boundary
+    request.updates = []
+    store.inbox[9] = {'update_id': 9, 'payload': None}
+    store.save_update(99, 10, PAYLOAD, NOW)
+    assert await transport.poll_once(NOW) == 1
+    assert [record['update_id'] for record in store.pending_updates()] == [9]
+
+
+async def test_legacy_long_outbox_sends_all_text_and_last_keyboard(boundary):
+    transport, request, store, _ = boundary
+    text = 'x' * 8193
+    store.outbox = [{'id': 1, 'lease_token': 'lease', 'chat_id': 7,
+                     'text': text, 'keyboard': {'inline_keyboard': [[{'text': 'OK', 'callback_data': 'ok'}]]}}]
+    assert await transport.deliver_once(NOW) == 1
+    sends = [params for method, params in request.calls if method == 'sendMessage']
+    assert [len(item['text']) for item in sends] == [4096, 4096, 1]
+    assert ''.join(item['text'] for item in sends) == text
+    assert all('reply_markup' not in item for item in sends[:-1])
+    assert sends[-1]['reply_markup']['inline_keyboard'][0][0]['callback_data'] == 'ok'
+
+
+async def test_run_recovers_after_cycle_failure(boundary, monkeypatch):
+    transport, _, _, _ = boundary
+    stop = asyncio.Event()
+    cycles = []
+
+    async def poll(now):
+        cycles.append('poll')
+        if cycles.count('poll') == 1:
+            raise RuntimeError('safe cycle failure')
+        stop.set()
+        return 0
+
+    async def deliver(now):
+        cycles.append('deliver')
+        return 0
+
+    monkeypatch.setattr(transport, 'poll_once', poll)
+    monkeypatch.setattr(transport, 'deliver_once', deliver)
+    await asyncio.wait_for(transport.run(stop), 2)
+    assert cycles == ['poll', 'deliver', 'poll', 'deliver']

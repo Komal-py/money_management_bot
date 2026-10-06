@@ -1,31 +1,37 @@
-# W4 command and durable transport evidence
+# W4 integrated transport hardening evidence
 
-## Delivered
+Baseline: worker/w4, clean at start; existing targeted command/transport tests: 52 passed. No saved untracked work was present. Read REQUIREMENTS and CONTRACTS. Only owned transport/tests/evidence changed; commands.py and telegram/__init__.py already meet their existing tested contract and remain unchanged. Controller/calendar/storage were inspected, not edited.
 
-- `src/budget_bot/telegram/commands.py`: frozen six-key parse_command envelope, shlex quoting, all W4 commands, bounded text/name/description fields, exact positive decimal amount strings, strict correction fields, reports/setup/access/timezone/help routing. Financial actions are proposals only. Missing income/expense description raises safe `CommandError(code="missing_fields")` with `.missing_fields`; trailing date alone is not a fabricated description. Allocate/transfer retain the specified action fields without invented business descriptions.
-- `src/budget_bot/telegram/transport.py`: injected PTB Bot/store/controller; durable save before handler and next polling offset; duplicate receipt delegated to store uniqueness; handler/complete failure retains inbox; one attempt per outbox claim per cycle; exact lease-token ack/fail; remote timeout at-least-once replay; safe callback answer then controller handling; no webhook deletion/drop/startup. Factory explicitly disables HTTPX redirects on both SDK requests. Interruptible one-second run-cycle delay and bounded receive/inbox/outbox batches.
-- `src/budget_bot/telegram/__init__.py`: command exports.
-- `tests/test_telegram_commands.py`, `tests/test_telegram_transport.py`: deterministic tests using real PTB Bot/Update conversion, inline keyboard serialization, controlled BaseRequest and frozen store/controller doubles.
+## Changes and regression evidence
 
-## Actual RED/GREEN execution
+Five exact regressions were added before the source fix and returned 5 failed, 11 passed: durable receipt lost on restart; JSON button lists using callback_data rejected; hung callback acknowledgement blocked ingress; long replies not split durably; rejected lease acknowledgement counted as delivery. Minimal transport changes made these green.
 
-1. Command tests before implementation: collection RED, missing budget_bot.telegram. After command implementation: GREEN, 39 passed.
-2. Transport tests before implementation: collection RED, missing budget_bot.telegram.transport. After implementation: GREEN, 45 passed; scoped Ruff passed.
-3. Added fault tests and date-only missing-description regression: RED, 2 failed / 50 passed (date tokens were wrongly accepted as descriptions). Corrected parser: GREEN, 52 passed in 3.42s; scoped Ruff: All checks passed.
+Transport uses the actual nested inbox payload and parses aware received_at ISO strings (including database-local offsets), retaining malformed records and failed handlers without blocking later records. Callback acknowledgement has a two-second asyncio deadline; failure does not discard durable handling. PTB markup is serialized before JSONB persistence; egress accepts normalized data buttons, callback_data lists and PTB inline_keyboard dictionaries. Long replies are split before atomic complete_update, conservatively at 4096 UTF-16 units without splitting a codepoint; only the last chunk gets buttons. Legacy oversized outbox rows are also split at send time. Rejected fenced acknowledgements are not counted.
 
-Final command, from W4 worktree:
+Previously passing behavior verified rather than rewritten: no webhook deletion/drop pending; both factory SDK requests disable redirects; receive timeout still drains durable inbox; duplicate handling; save-before-handle; handler retry; run restart after cycle failure; send failure retry; ack failure replay. Financial commands remain action proposals with no direct commit calls.
 
-    PYTHONPATH="$PWD/src" 'C:/Users/FL_LPT-657/Projects/telegram_bot/.venv/Scripts/python.exe' -m pytest tests/test_telegram*.py -q
+## Actual verification
 
-Lint:
+Windows bash, project venv, no dependency installation:
 
-    'C:/Users/FL_LPT-657/Projects/telegram_bot/.venv/Scripts/python.exe' -m ruff check src/budget_bot/telegram/commands.py src/budget_bot/telegram/transport.py src/budget_bot/telegram/__init__.py tests/test_telegram_commands.py tests/test_telegram_transport.py
+    export PYTHONPATH="$PWD/src" BUDGET_TEST_SCHEMA=test_w4
+    C:/Users/FL_LPT-657/Projects/telegram_bot/.venv/Scripts/python.exe -m pytest tests/test_telegram_store_integration.py tests/test_telegram_transport.py tests/test_telegram_commands.py -q --tb=short
 
-## Integration boundaries / gaps (not claimed verified)
+Final result: 64 passed in 10.78s, including four real PostgreSQL BudgetStore tests. BUDGET_TEST_DATABASE_URL came only from supplied environment; fixture asserts test_w4, never reads credentials from files. Store has 5s lock, 15s statement and 20s idle transaction limits. Fixture clears only transport tables in test_w4 before/after tests; synthetic owner/proposal records remain in that isolated schema, with the proposal cancelled. No financial confirmation/ledger commit performed.
 
-- Real PostgreSQL BudgetStore and parent controller were unavailable in this worktree and are injected doubles. No database, live Telegram, full bot startup, services, or remote writes were exercised. Store unique receipt, lease claim/expiry/backoff/fencing and atomic inbox completion/outbox insertion must be verified by parent integration against W2.
-- Transport expects pending inbox records `{update_id, payload}`; the frozen contract lists pending_updates but does not specify that record shape. Parent must align this shape. Store determines bot-scoping of pending records and offsets; transport assumes one bot per store/runtime.
-- Caller initializes/closes Bot and owns store lifecycle. Parent owns private-chat authorization, owner-scoped undo/correction resolution, workflow review/confirm, timezone/date resolution and forwarding recoverable CommandError fields. Received_at/timezone are signature-compatible; parser leaves action dates unresolved for the domain.
-- Retry is indefinite durable retention, not finite discard: bounded attempts/batches per cycle, store-managed retry schedule, no loss on exhausted attempts. Failed ack propagates and leaves a lease to expire; a subsequent remote send may duplicate a reply. No exactly-once Telegram delivery claim.
-- create_bot supplies no-redirect SDK configuration; externally injected production Bots must use equivalent configuration. Factory test inspects actual PTB HTTPX clients; test request implementations make no live calls.
-- No shared settings/dependencies/contracts, calendar.py, or sibling files modified. Only owned files are committed.
+Real store exercises SDK-normalized nested payloads, original receipt instant, duplicate durable receipt, failed handler and new transport instance restart, atomic JSONB chunk outbox, lease/backoff/fencing, durable offset despite handler failure, and a missing update ID filled later. Money-before-onboarding is rejected by the real planner; bucket command yields a pending proposal without changing snapshot.
+
+    C:/Users/FL_LPT-657/Projects/telegram_bot/.venv/Scripts/python.exe -m ruff check src/budget_bot/telegram/commands.py src/budget_bot/telegram/transport.py src/budget_bot/telegram/__init__.py tests/test_telegram*.py
+    git diff --check
+
+Both passed. No full suite, live Telegram/provider traffic, token, new database, role, or server. Network controlled through PTB BaseRequest; database is the approved existing test database.
+
+## Concrete parent/storage boundaries against this baseline
+
+1. Storage pending_outbox sorts due_at/id (random UUID), not update/position, and claims independently. Split chunks are durable and complete but can be delivered out of sequence; Confirm can arrive before earlier review chunks. Parent/W2 must enforce per-reply ordered delivery and prevent later chunks overtaking a failed earlier chunk. Integration deliberately compares sent content without claiming order. Legacy oversized single-row retries repeat all chunks after partial remote delivery (at-least-once).
+2. Storage contiguous cursor remains at a genuinely absent ID indefinitely. Telegram filtered updates can have legitimate numeric gaps and IDs can reset after inactivity. Test verifies baseline 10,12 leaves offset 11, then receipt 11 advances to 13; it does NOT claim genuine absent-gap recovery. Transport must not invent receipt or advance beyond store authority. Storage needs an atomic fetched-batch/high-water receipt API acknowledging known returned gaps, with a defined reset policy. No unsupported API or storage patch added.
+3. pending_updates is not bot-scoped; complete_update selects by update_id alone and rejects same ID across bots. Current single-bot runtime works; multi-bot inbox draining needs bot-scoped claim/completion APIs, not transport guessing another bot's identity.
+4. Controller baseline only routes rev callbacks, help, mutation, balances and spending. Missing routes: calendar query/cal/day callbacks; setup callbacks/start redemption; admin invite/users/revoke; timezone/cancel; natural-language/clarification. Parent owns those routes and private identity checks. No controller/calendar changes made, and no claim that these routes work.
+5. Controller recomputes message date for command proposals; callback decisions receive the durable receipt instant from transport. Parent should review confirmation-expiry policy for delayed callback processing (processing time versus receipt), without relaxing store expiry checks.
+
+Parent integrates and publishes; this worker does not claim a finished app or live verification.
