@@ -68,6 +68,10 @@ def button(telegram_id, data):
             'message': {'chat': {'id': telegram_id, 'type': 'private'}}, 'data': data}}
 
 
+def keyboard_data(reply, label):
+    return next(item['data'] for row in reply['keyboard'] for item in row if item['text'] == label)
+
+
 @pytest.mark.asyncio
 async def test_invite_redemption_uses_trusted_identity_and_starts_setup(db, actor, app):
     _, admin = actor
@@ -102,11 +106,11 @@ async def test_invites_are_strictly_parsed_without_token_repair(db, actor, app, 
 async def test_revoked_owner_cannot_redeem_or_resume(db, actor, app):
     telegram_id = uuid4().int % (2**52 - 1) + 1
     owner = db.redeem_invite(db.create_invite(actor[1], NOW), telegram_id, NOW)
-    app.onboarding.handle(owner, '/start', NOW)
+    setup = app.onboarding.handle(owner, '/start', NOW)
     db.revoke_user(actor[1], telegram_id, NOW)
     code = db.create_invite(actor[1], NOW)
     for payload in (private(telegram_id, f'/start {code}'), private(telegram_id, '10'),
-                    button(telegram_id, 'setup:finish')):
+                    button(telegram_id, keyboard_data(setup, 'Cancel'))):
         response = await app.handle(payload, NOW)
         assert 'revoked' in response[0]['text'].lower()
     assert db.get_user(telegram_id)['active'] is False

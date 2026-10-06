@@ -127,13 +127,20 @@ class BudgetController:
                 if setup and decision == 'cancel' and (output.get('result') or {}).get('status') == 'cancelled':
                     self._setup_cancelled(owner, request, now)
                 return output
-            if data in {'setup:back', 'setup:cancel', 'setup:finish', 'setup:more'}:
+            if data.startswith('setup:'):
+                try:
+                    _, action, request = data.split(':')
+                    if action not in {'back', 'cancel', 'finish', 'more'} or str(UUID(request)) != request:
+                        raise ValueError
+                except (ValueError, TypeError):
+                    return 'That setup button is invalid or no longer current. Use /start for setup.'
                 if user.get('onboarded'):
                     return 'Setup is already complete. Use /start for the menu.'
-                return self._setup_output(self.onboarding.handle(owner, data, now))
+                return self._setup_output(self.onboarding.handle(
+                    owner, f'setup:{action}', now, expected_request=request))
             if data.startswith(('cal:', 'day:')):
                 if not user.get('onboarded'):
-                    return self._setup_output(self.onboarding.handle(owner, '/start', now))
+                    return 'Complete setup first. Send /start to open or resume it.'
                 output = await self._conversation().dispatch(owner, '', received, now, callback_data=data)
                 return output or 'That button is not available. Use /help.'
             return 'That button is not available. Use /help.'

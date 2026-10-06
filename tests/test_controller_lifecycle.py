@@ -5,7 +5,7 @@ import pytest
 
 from test_controller import NOW
 import test_controller_ingress as ingress
-from test_controller_ingress import private, button
+from test_controller_ingress import private, button, keyboard_data
 
 db = ingress.db
 actor = ingress.actor
@@ -14,8 +14,8 @@ app = ingress.app
 
 async def setup_review(app, telegram_id):
     for text in ('/start', '100', 'Travel', '40'):
-        await app.handle(private(telegram_id, text), NOW)
-    return await app.handle(button(telegram_id, 'setup:finish'), NOW)
+        replies = await app.handle(private(telegram_id, text), NOW)
+    return await app.handle(button(telegram_id, keyboard_data(replies[0], 'Review')), NOW)
 
 
 def review_data(review, decision):
@@ -51,8 +51,8 @@ async def test_setup_buttons_answers_and_safe_invalid_input_precede_conversation
     assert 'opening' in response[0]['text'].lower()
     response = await app.handle(private(telegram_id, 'not an amount'), NOW)
     assert 'amount' in response[0]['text'].lower() or 'money' in response[0]['text'].lower()
-    await app.handle(private(telegram_id, '0'), NOW)
-    response = await app.handle(button(telegram_id, 'setup:back'), NOW)
+    response = await app.handle(private(telegram_id, '0'), NOW)
+    response = await app.handle(button(telegram_id, keyboard_data(response[0], 'Back')), NOW)
     assert 'opening' in response[0]['text'].lower()
     assert app.conversation.calls == []
     assert db.get_snapshot(owner)['transactions'] == []
@@ -67,8 +67,8 @@ async def test_setup_edit_exact_review_restarts_but_old_or_foreign_edit_cannot_r
     assert 'opening' in response[0]['text'].lower()
     assert db.get_pending(owner) is None
     for text in ('200', 'Food', '50'):
-        await app.handle(private(telegram_id, text), NOW)
-    await app.handle(button(telegram_id, 'setup:finish'), NOW)
+        response = await app.handle(private(telegram_id, text), NOW)
+    await app.handle(button(telegram_id, keyboard_data(response[0], 'Review')), NOW)
     current = db.get_pending(owner)
     assert current['request_id'] != old['request_id']
     stranger_id = uuid4().int % (2**52 - 1) + 1
@@ -246,8 +246,8 @@ async def test_database_failure_boundaries_remain_retryable(db, actor, app, monk
         payload = private(telegram_id, f'/start {db.create_invite(owner, NOW)}')
     elif boundary in {'propose', 'confirm'}:
         for text in ('/start', '100', 'Travel', '40'):
-            await app.handle(private(telegram_id, text), NOW)
-        payload = button(telegram_id, 'setup:finish')
+            response = await app.handle(private(telegram_id, text), NOW)
+        payload = button(telegram_id, keyboard_data(response[0], 'Review'))
         if boundary == 'confirm':
             await app.handle(payload, NOW)
             payload = button(telegram_id, review_data(db.get_pending(owner), 'confirm'))

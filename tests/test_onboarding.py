@@ -185,9 +185,17 @@ def test_back_cancel_edit_restart_and_stale_review(store, owner, service):
     assert service.cancel(owner, NOW) == cancelled
     assert service.handle(owner, 'setup:finish', NOW) == cancelled
     assert store.get_pending(owner) is None
-    assert service.handle(owner, '/start', NOW) == opening
+    restarted = service.handle(owner, '/start', NOW)
+    assert {key: value for key, value in restarted.items() if key != 'keyboard'} == {
+        key: value for key, value in opening.items() if key != 'keyboard'}
+    first_request = opening['keyboard'][0][0]['data'].split(':')[-1]
+    next_request = restarted['keyboard'][0][0]['data'].split(':')[-1]
+    assert next_request != first_request
     service.handle(owner, '40', NOW)
-    assert service.handle(owner, '/restart', NOW) == opening
+    reset = service.handle(owner, '/restart', NOW)
+    assert {key: value for key, value in reset.items() if key != 'keyboard'} == {
+        key: value for key, value in opening.items() if key != 'keyboard'}
+    assert reset['keyboard'][0][0]['data'].split(':')[-1] not in {first_request, next_request}
     assert store.get_snapshot(owner)['buckets'] == {}
 
 

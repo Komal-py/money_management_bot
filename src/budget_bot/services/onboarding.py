@@ -78,10 +78,12 @@ class OnboardingService:
             'allocation': f'How much INR should we allocate to {state.get("name", "this bucket")} (0 to skip)?',
             'more': 'Would you like to add another bucket or review setup?',
         }
-        keyboard = [[{'text': 'Back', 'data': 'setup:back'}, {'text': 'Cancel', 'data': 'setup:cancel'}]]
+        request = state['request_id']
+        keyboard = [[{'text': 'Back', 'data': f'setup:back:{request}'},
+                     {'text': 'Cancel', 'data': f'setup:cancel:{request}'}]]
         if state['step'] == 'more':
-            keyboard.insert(0, [{'text': 'Add more', 'data': 'setup:more'},
-                                {'text': 'Review', 'data': 'setup:finish'}])
+            keyboard.insert(0, [{'text': 'Add more', 'data': f'setup:more:{request}'},
+                                {'text': 'Review', 'data': f'setup:finish:{request}'}])
         return self._response(messages[state['step']], keyboard)
 
     @staticmethod
@@ -114,9 +116,10 @@ class OnboardingService:
             return self._prompt(state)
         state['step'] = 'review'
         if datetime.fromisoformat(review['expires_at']) <= now:
+            request = state['request_id']
             return self._response('Setup review expired. Use Back to review again, Edit, /restart or Cancel.',
-                                  [[{'text': 'Back', 'data': 'setup:back'},
-                                    {'text': 'Cancel', 'data': 'setup:cancel'}]])
+                                  [[{'text': 'Back', 'data': f'setup:back:{request}'},
+                                    {'text': 'Cancel', 'data': f'setup:cancel:{request}'}]])
         return self._response('Review setup before confirming. No money has been recorded.', review=review)
 
     def back(self, owner_id, now):
@@ -146,14 +149,19 @@ class OnboardingService:
         elif state['step'] == 'name':
             state['step'] = 'more' if state['buckets'] else 'opening'
 
-    def handle(self, owner_id, text, now):
+    def handle(self, owner_id, text, now, *, expected_request=None):
+        """Handle text, optionally fencing a button to its draft under the setup lock."""
         self._now(now)
         with self.store.engine.begin() as connection:
             self._lock(connection, owner_id)
             snapshot = self.store.get_snapshot(owner_id)
+            state = self._load(connection, owner_id)
+            if expected_request is not None and (
+                    snapshot['onboarded'] or not state or state['step'] == 'cancelled'
+                    or state.get('request_id') != expected_request):
+                raise BudgetError('stale_setup', 'That setup button is no longer current. Use /start for setup.')
             if snapshot['onboarded']:
                 return self._response('Setup is complete. Open balances or the calendar.', done=True)
-            state = self._load(connection, owner_id)
             if state is None:
                 state = self._new_state()
                 if text in ('setup:cancel', '/cancel', 'Cancel', 'cancel'):
