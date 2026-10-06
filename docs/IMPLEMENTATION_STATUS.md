@@ -24,7 +24,7 @@ The initial combined test attempt used test_coordinator while storage tests requ
 
 Guided onboarding/access service, AI adapter, durable LangGraph workflows, final startup wiring, real report/controller/calendar integration, independent W8 acceptance/security review, complete acceptance gates, and build/live smoke verification remain unfinished. The bot application is not running. No GitHub push has occurred.
 
-The later W3/W5 alternate-route process records show exit -15 after interruption; they are not completion evidence. No worker process was running at the latest process-list check. Do not infer the cause of those exits from the token-rate-limit failures above.
+The later W3/W5 alternate-route process records showed exit -15 after interruption; they are not completion evidence. The owner's subsequent request to run all workers concurrently supersedes that idle state: **W1–W8 were launched together and all eight launcher/agent trees and requested model/effort routes were read back as running**. New run handles and timestamped startup evidence are in ignored `.coordination/parallel-run.json` and `.coordination/parallel-startup.json`. Each run is bounded to 1800 seconds, with low/medium effort across the already configured gpt-6-astra and gpt-6.1-sol routes. This is startup evidence, not component completion or quota/price verification. Each worktree contains the verified main baseline; saved untracked W3/W5 work was retained. Do not infer the cause of the earlier interrupted exits from the token-rate-limit failures above.
 
 ## Approvals and resource boundaries
 
