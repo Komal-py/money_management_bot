@@ -9,13 +9,15 @@ from budget_bot.domain.errors import BudgetError
 
 
 class BudgetController:
-    def __init__(self, store, workflow, onboarding, reports, access, command_parser=None, *, conversation=None):
+    def __init__(self, store, workflow, onboarding, reports, access, command_parser=None, *, conversation=None,
+                 guided=None):
         self.store = store
         self.workflow = workflow
         self.onboarding = onboarding
         self.reports = reports
         self.access = access
         self.conversation = conversation
+        self.guided = guided
         if command_parser is None:
             from budget_bot.telegram.commands import parse_command
             command_parser = parse_command
@@ -26,6 +28,20 @@ class BudgetController:
             from budget_bot.services.conversation import ConversationRouter
             self.conversation = ConversationRouter(self.store, self.workflow, self.reports)
         return self.conversation
+
+    def _guided(self):
+        if self.guided is None:
+            from budget_bot.services.guided_entry import GuidedEntry
+            self.guided = GuidedEntry(self.store, self.workflow)
+        return self.guided
+
+    def _menu(self):
+        # Guided entry buttons only collect fields; the result is still the
+        # normal Confirm/Edit/Cancel review from the workflow.
+        menu = self._conversation().menu()
+        return {**menu, 'keyboard': [[{'text': 'Add expense', 'data': 'entry:expense'},
+                                      {'text': 'Add income', 'data': 'entry:income'}],
+                                     *menu.get('keyboard', [])]}
 
     @staticmethod
     def _reply(chat_id, output):
@@ -153,6 +169,10 @@ class BudgetController:
                     return 'Setup is already complete. Use /start for the menu.'
                 return self._setup_output(self.onboarding.handle(
                     owner, f'setup:{action}', now, expected_request=request))
+            if data.startswith('entry:'):
+                if not user.get('onboarded'):
+                    return 'Complete setup first. Send /start to open or resume it.'
+                return await self._guided().handle_callback(owner, data, received, now, operation=operation)
             if data.startswith(('cal:', 'day:')):
                 if not user.get('onboarded'):
                     return 'Complete setup first. Send /start to open or resume it.'
@@ -169,6 +189,9 @@ class BudgetController:
             received = datetime.fromtimestamp(receipt, timezone.utc)
         except (ValueError, OverflowError, OSError):
             return 'That message timestamp is invalid. Please send it again.'
+        if (not text.startswith('/') and user.get('onboarded') and self.guided is not None
+                and self.guided.active(owner, now)):
+            return await self.guided.handle_text(owner, text, received, now, operation=operation)
         if text.startswith('/') and self.command_parser:
             try:
                 command = self.command_parser(text, received, user['timezone'])
@@ -183,9 +206,11 @@ class BudgetController:
                 return f'Timezone set to {command["args"][0]}.'
             if command['kind'] == 'setup':
                 if user.get('onboarded'):
-                    return self._conversation().menu()
+                    return self._menu()
                 return self._setup_output(self.onboarding.handle(owner, '/start', now))
             if command['kind'] == 'cancel':
+                if self.guided is not None and self.guided.cancel(owner):
+                    return 'Entry cancelled. Nothing was saved.'
                 if self.onboarding is not None and self.onboarding.active(owner):
                     return self.onboarding.cancel(owner, now)
                 pending = self.store.get_pending(owner)
