@@ -13,13 +13,15 @@ _BARE_SPENDING = re.compile(r'/spending(?:@[A-Za-z0-9_]+)?\s*')
 
 
 class BudgetController:
-    def __init__(self, store, workflow, onboarding, reports, access, command_parser=None, *, conversation=None):
+    def __init__(self, store, workflow, onboarding, reports, access, command_parser=None, *, conversation=None,
+                 guided=None):
         self.store = store
         self.workflow = workflow
         self.onboarding = onboarding
         self.reports = reports
         self.access = access
         self.conversation = conversation
+        self.guided = guided
         if command_parser is None:
             from budget_bot.telegram.commands import parse_command
             command_parser = parse_command
@@ -30,6 +32,17 @@ class BudgetController:
             from budget_bot.services.conversation import ConversationRouter
             self.conversation = ConversationRouter(self.store, self.workflow, self.reports)
         return self.conversation
+
+    def _guided(self):
+        if self.guided is None:
+            from budget_bot.services.guided_entry import GuidedEntry
+            self.guided = GuidedEntry(self.store, self.workflow)
+        return self.guided
+
+    def _menu(self):
+        # The persistent reply keyboard already carries Add expense / Add income;
+        # those start the guided entry, which still ends in Confirm/Edit/Cancel.
+        return self._conversation().menu()
 
     @staticmethod
     def _reply(chat_id, output):
@@ -157,6 +170,10 @@ class BudgetController:
                     return 'Setup is already complete. Use /start for the menu.'
                 return self._setup_output(self.onboarding.handle(
                     owner, f'setup:{action}', now, expected_request=request))
+            if data.startswith('entry:'):
+                if not user.get('onboarded'):
+                    return 'Complete setup first. Send /start to open or resume it.'
+                return await self._guided().handle_callback(owner, data, received, now, operation=operation)
             if data.startswith(('cal:', 'day:')):
                 if not user.get('onboarded'):
                     return 'Complete setup first. Send /start to open or resume it.'
@@ -181,6 +198,10 @@ class BudgetController:
         # Persistent reply-keyboard buttons send their label as plain text; map an
         # exact label to the command it stands for so it follows the same path.
         text = menu.button_command(text) or text
+        if text in ('entry:expense', 'entry:income'):
+            if self.onboarding is not None and not user.get('onboarded'):
+                return self._setup_output(self.onboarding.handle(owner, '/start', now))
+            return self.guided.start(owner, text.split(':')[1], now)
         receipt = message.get('date', int(now.timestamp()))
         try:
             if type(receipt) is not int:
@@ -188,6 +209,9 @@ class BudgetController:
             received = datetime.fromtimestamp(receipt, timezone.utc)
         except (ValueError, OverflowError, OSError):
             return 'That message timestamp is invalid. Please send it again.'
+        if (not text.startswith('/') and user.get('onboarded') and self.guided is not None
+                and self.guided.active(owner, now)):
+            return await self.guided.handle_text(owner, text, received, now, operation=operation)
         if text.startswith('/') and self.command_parser:
             if _BARE_SPENDING.fullmatch(text):
                 if self.onboarding is not None and not user.get('onboarded'):
@@ -206,9 +230,11 @@ class BudgetController:
                 return f'Timezone set to {command["args"][0]}.'
             if command['kind'] == 'setup':
                 if user.get('onboarded'):
-                    return self._conversation().menu()
+                    return self._menu()
                 return self._setup_output(self.onboarding.handle(owner, '/start', now))
             if command['kind'] == 'cancel':
+                if self.guided is not None and self.guided.cancel(owner):
+                    return 'Entry cancelled. Nothing was saved.'
                 if self.onboarding is not None and self.onboarding.active(owner):
                     return self.onboarding.cancel(owner, now)
                 pending = self.store.get_pending(owner)

@@ -39,8 +39,8 @@ _ADMIN_COMMANDS = (
 # ordinary word such as a bucket name is never mistaken for a button press.
 MAIN_MENU = (
     (('💰 Balance', '/balance'), ('📊 Spending', '/spending')),
-    (('📅 Calendar', '/calendar'), ('🏠 Menu', '/start')),
-    (('❓ Help', '/help'), ('✖️ Cancel', '/cancel')),
+    (('➕ Add expense', 'entry:expense'), ('💵 Add income', 'entry:income')),
+    (('📅 Calendar', '/calendar'), ('❓ Help', '/help')),
 )
 _BUTTON_COMMANDS = {label: command for row in MAIN_MENU for label, command in row}
 

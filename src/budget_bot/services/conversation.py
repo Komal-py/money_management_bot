@@ -47,9 +47,8 @@ class ConversationRouter:
         # to these same existing commands; it never adds callback protocols.
         from budget_bot.telegram.menu import main_menu_keyboard
         return {'text': 'Your virtual INR budget\n'
-                        'Tell me an expense or money change, or use these commands:\n'
-                        '/balance\n/spending today\n/spending week\n/spending month\n/calendar\n'
-                        '/help\n/cancel\n'
+                        'Use the menu buttons below, type an expense in plain words '
+                        '(e.g. "Spent 120 on Food"), or type / for all commands.\n'
                         'Every money change needs your review and explicit Confirm. '
                         'Reports and calendar navigation never change money.',
                 'keyboard': main_menu_keyboard()}

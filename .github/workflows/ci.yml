@@ -101,7 +101,8 @@ jobs:
           tests/test_storage_planner.py
           tests/test_controller.py tests/test_controller_commands.py tests/test_controller_reports.py
           tests/test_controller_ingress.py tests/test_controller_lifecycle.py tests/test_controller_setup_replay.py tests/test_controller_menu.py
-          tests/test_domain_dates.py tests/test_domain_money.py tests/test_domain_planner.py -q
+          tests/test_domain_dates.py tests/test_domain_money.py tests/test_domain_planner.py
+          tests/test_guided_entry.py -q
       - name: Startup and settings (test_w1 only)
         env:
           BUDGET_TEST_SCHEMA: test_w1
