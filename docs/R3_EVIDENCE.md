@@ -1,6 +1,6 @@
 # R3 conversation recovery evidence
 
-Scope: worker/r3, recovery r3-retry1. Only conversation.py, test_conversation.py and this evidence file changed. Historical baseline totals are not results from this run.
+Original recovery scope: worker/r3, recovery r3-retry1. That recovery changed only conversation.py, test_conversation.py and this evidence file. The independently reviewed error-boundary repair and coordinator-requested query receipt seam are recorded separately below. Historical baseline totals are not results from the repair run.
 
 ## Interface delivered
 
@@ -88,3 +88,74 @@ The tests require test_w7 and inherited test DB configuration, initialize existi
 - Read-only source finding, not repaired or marked as passing acceptance: `workflows/workflow.py:543-550` accepts only mutation after an interpreter clarification. The AI adapter can ask for report period/start/end or unknown-bucket clarification, but the graph rejects a subsequent query with invalid_answer. R3 correctly gives the current question priority and does not bypass it. Supporting report clarification-to-query completion requires a coordinator-owned workflow change, including preserving original receipt when rendering that completed query. Current tests cover directly validated NL queries, not that unsupported workflow transition.
 - Month callbacks contain no financial data and rely on caller authorization; day/report reads use only the explicit caller owner. Telegram actor checks and revocation ingress are R2 responsibilities.
 - No unowned files were edited. No new dependencies or financial semantics were introduced. Full merged regression, durable checkpoint coverage, release packaging, live smoke and CI remain coordinator work.
+
+## Independent review repair: dependency error masking
+
+Repair base: `9c54c44fc562a1a17dc8c29212a7e9de0919a4d1` in preserved `.worktrees/r3`, branch `worker/r3`. The independent coordinator repro was present as an untracked test; it was rerun before any production edits. All commands in this section ran from `C:/Users/FL_LPT-657/Projects/telegram_bot` via the approved runner, without reading or printing credentials/URLs. Existing real PostgreSQL schema `test_w7` only; no DB/container/server provisioning, live Telegram/provider, full suite, merge or push.
+
+Root cause: `_calendar` caught ordinary `ValueError` across `day_view`'s owner-scoped store read and rendering. `_report` caught ordinary `ValueError` and `BudgetError('invalid_date')` across snapshot reads and report services. Dependency faults became successful invalid-input replies, including dependency Pydantic `ValidationError` (a `ValueError` subclass).
+
+Minimal repair:
+
+- `_ReportInputError` identifies only router input rejection. Catch Pydantic `ValidationError` only around `Query.model_validate`; catch `invalid_date` only around receipt-local input validation. Snapshot/report dependency calls are outside those catches. Strict envelope, date/range, unsupported filters and owner bucket validation keep their existing safe replies.
+- Catch ordinary `ValueError` only around pure callback parsing. `CalendarInputError(ValueError)` identifies invalid/out-of-range pages; `day_view` still uses one owner-scoped `store.spending` read before deciding whether the requested page exists. Store and rendering failures propagate unchanged. Existing direct calendar callers retain `ValueError` compatibility.
+- Expanded repro verifies exception object identity for ordinary `ValueError`, Pydantic `ValidationError` and dependency `BudgetError('invalid_date')` at snapshot/spending/balances/day boundaries. Two out-of-range page tests assert safe replies, exactly one spending read, caller owner, unchanged snapshot and pending state. Existing malformed inputs, unknown bucket, date/range and owner isolation tests remain unchanged.
+
+Actual RED:
+
+```text
+python .private/run_tests.py r3 --schema test_w7 tests/test_conversation_dependency_errors.py -q --tb=short --junitxml=C:/Users/FL_LPT-657/Projects/telegram_bot/.coordination/r3-dependency-errors-red.xml
+```
+
+Result: **4 failed in 7.58s**, each `DID NOT RAISE ValueError` as independently reported.
+
+Expanded RED, still before production edits:
+
+```text
+python .private/run_tests.py r3 --schema test_w7 tests/test_conversation_dependency_errors.py -q --tb=short --junitxml=C:/Users/FL_LPT-657/Projects/telegram_bot/.coordination/r3-dependency-errors-expanded-red.xml
+```
+
+Result: **11 failed, 3 passed in 15.52s**. All four ordinary ValueError and four dependency ValidationError boundaries failed; three report-side dependency invalid_date boundaries failed. Day invalid_date already propagated, and both existing out-of-range safe replies passed. No invented RED for those three passing controls.
+
+First GREEN, before the separate receipt seam addition: the two conversation files together returned **89 passed in 73.12s** using the final targeted command below. The final XML replaces that first GREEN artifact.
+
+## Separate coordinator-requested seam: persisted query receipt
+
+The coordinator explicitly extended ownership to `tests/test_conversation.py` and requested support for trusted backend workflow output `query_received_at`. Router now parses `datetime.fromisoformat(output.get('query_received_at', received_at.isoformat()))` only when rendering a workflow query. Explicit `query=` dispatch still uses its supplied receipt. Missing metadata remains backward compatible, and backend metadata is not included in the rendered output. No workflow.py/main edits were made.
+
+Four controlled workflow-output cases use the real PostgreSQL store and deterministic ReportService/calendar: spending/calendar with and without persisted receipt. The persisted receipt is before Asia/Kolkata midnight/month end; the reply is after it. Two different dated expenses distinguish the spending totals. All cases also assert explicit-query receipt behavior and read-only snapshot/pending state. This verifies the router seam, not the coordinator's actual graph clarification implementation.
+
+```text
+python .private/run_tests.py r3 --schema test_w7 tests/test_conversation.py -q -k workflow_query_uses_persisted_receipt --tb=short --junitxml=C:/Users/FL_LPT-657/Projects/telegram_bot/.coordination/r3-query-receipt-red.xml
+```
+
+RED before the receipt production change: **2 failed, 2 passed, 75 deselected in 11.49s**. Persisted spending/calendar incorrectly rendered the later March receipt; missing-metadata controls already passed.
+
+```text
+python .private/run_tests.py r3 --schema test_w7 tests/test_conversation.py -q -k workflow_query_uses_persisted_receipt --tb=short --junitxml=C:/Users/FL_LPT-657/Projects/telegram_bot/.coordination/r3-query-receipt-green.xml
+```
+
+GREEN: **4 passed, 75 deselected in 10.75s**.
+
+## Final repair verification
+
+```text
+python .private/run_tests.py r3 --schema test_w7 tests/test_conversation.py tests/test_conversation_dependency_errors.py -q --tb=short --junitxml=C:/Users/FL_LPT-657/Projects/telegram_bot/.coordination/r3-dependency-errors-green.xml
+```
+
+Final targeted real PostgreSQL result: **93 passed in 80.88s** (79 conversation cases, 14 dependency/page cases), no failures, skips or xfails.
+
+Additional compatibility check for the minimally changed calendar exception type:
+
+```text
+python .private/run_tests.py r3 --schema test_w7 tests/test_reports_calendar.py -q --tb=short --junitxml=C:/Users/FL_LPT-657/Projects/telegram_bot/.coordination/r3-calendar-exception-compatibility.xml
+```
+
+Result: **23 passed in 0.63s**. These existing calendar unit cases use StoreDouble, not PostgreSQL, and verify direct ValueError callers still work.
+
+```text
+uv run --no-sync ruff check .worktrees/r3/src/budget_bot/services/conversation.py .worktrees/r3/tests/test_conversation_dependency_errors.py .worktrees/r3/src/budget_bot/telegram/calendar.py .worktrees/r3/tests/test_conversation.py
+git -C C:/Users/FL_LPT-657/Projects/telegram_bot/.worktrees/r3 diff --check
+```
+
+Ruff: **All checks passed**. Whitespace check: **exit 0**; staged whitespace check also required before commit. Repair-owned files: conversation.py, calendar.py, test_conversation_dependency_errors.py, test_conversation.py and this evidence file. No unresolved issue in these targeted repairs. Parent retains workflow integration, assembled acceptance and final review; the historical workflow gap above was reported repaired in main by the coordinator but is not present or exercised in this preserved worktree.

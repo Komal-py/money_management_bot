@@ -7,9 +7,13 @@ from budget_bot.services.reports import _date, _money, _summary
 _MAX_PAGE = 999999
 
 
+class CalendarInputError(ValueError):
+    """Invalid calendar input, not a store or rendering failure."""
+
+
 def _page(page):
     if type(page) is not int or not 0 <= page <= _MAX_PAGE:
-        raise ValueError('Invalid calendar page.')
+        raise CalendarInputError('Invalid calendar page.')
     return page
 
 
@@ -60,7 +64,7 @@ def day_view(store, owner_id, date, page=0):
     rows = sorted(result['expenses'], key=lambda row: (row['date'], row['id']))
     pages = max(1, (len(rows) + 7) // 8)
     if page >= pages:
-        raise ValueError('Calendar page is out of range.')
+        raise CalendarInputError('Calendar page is out of range.')
     lines = [_summary(result), f'Page {page + 1} of {pages}']
     for row in rows[page * 8:(page + 1) * 8]:
         lines.append(f'{row["date"]} | {row["bucket"]} | {_money(row["amount"])} | {row["description"]}')

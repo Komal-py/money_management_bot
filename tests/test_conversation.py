@@ -136,6 +136,43 @@ async def test_explicit_query_is_offline_and_receipt_anchored(store, owner, repo
     assert store.get_snapshot(owner) == before
 
 
+@pytest.mark.parametrize('report', ['spending', 'calendar'])
+@pytest.mark.parametrize('persisted_receipt', [True, False])
+async def test_workflow_query_uses_persisted_receipt_or_current_receipt_fallback(
+        store, owner, monkeypatch, report, persisted_receipt):
+    original = datetime(2024, 2, 29, 18, 29, tzinfo=timezone.utc)
+    reply = original + timedelta(minutes=2)  # Asia/Kolkata midnight and month boundary.
+    review = store.propose(owner, [expense('3', day='2024-02-29'), expense('5', day='2024-03-01')], RECEIVED)
+    store.confirm(owner, review['request_id'], review['revision'], RECEIVED)
+    interpreter = ControlledInterpreter()
+    flow = BudgetWorkflow(store, interpreter)
+    output = {'query': query(report)}
+    if persisted_receipt:
+        output['query_received_at'] = original.isoformat()
+    calls = []
+
+    async def answer(owner_id, text, now):
+        calls.append((owner_id, text, now))
+        return output
+
+    monkeypatch.setattr(flow, 'answer', answer)
+    before, pending = store.get_snapshot(owner), store.get_pending(owner)
+    out = await router(store, flow).dispatch(owner, 'today', reply, NOW)
+    if report == 'spending':
+        assert ('2024-02-29 to 2024-02-29' if persisted_receipt else '2024-03-01 to 2024-03-01') in out['text']
+        assert ('Total spent: ₹3.00' if persisted_receipt else 'Total spent: ₹5.00') in out['text']
+    else:
+        assert out['text'] == ('February 2024' if persisted_receipt else 'March 2024')
+    assert out['query'] == query(report) and 'query_received_at' not in out
+    assert calls == [(owner, 'today', NOW)] and not interpreter.calls
+    assert store.get_snapshot(owner) == before and store.get_pending(owner) == pending
+    # Explicit query dispatch uses its supplied receipt, never workflow metadata.
+    explicit = await router(store, flow).dispatch(owner, None, reply, NOW, query=query(report))
+    assert ('Total spent: ₹5.00' if report == 'spending' else 'March 2024') in explicit['text']
+    assert calls == [(owner, 'today', NOW)]
+    assert store.get_snapshot(owner) == before and store.get_pending(owner) == pending
+
+
 @pytest.mark.parametrize('bad_query', [
     {}, [], 'balances', query(report='sql'), query(report=[]), query(period=True),
     query(period='year'), query(owner_id='someone-else'), query(sql='SELECT private'),
