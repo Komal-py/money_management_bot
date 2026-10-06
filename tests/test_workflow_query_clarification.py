@@ -8,6 +8,8 @@ import httpx
 import pytest
 
 from budget_bot.domain.errors import BudgetError
+from budget_bot.services.conversation import ConversationRouter
+from budget_bot.services.reports import ReportService
 from budget_bot.storage import BudgetStore
 from budget_bot.workflows import BudgetWorkflow, postgres_checkpointer
 from test_ai_provider import client_for, response
@@ -107,7 +109,8 @@ async def test_report_origin_period_then_bucket_clarification_can_finish_query_a
         await client.close()
 
 
-@pytest.mark.parametrize('mode', ['funding', 'expense_clarification', 'edit', 'changed_clarification', 'bucket_only'])
+@pytest.mark.parametrize('mode', ['funding', 'expense_clarification', 'edit', 'changed_clarification',
+                                  'bucket_only', 'report_to_mutation'])
 async def test_query_cannot_bypass_mutation_clarification_or_pending_edit(store, monkeypatch, mode):
     owner = onboard(store, uuid4().int % (2**62))
     baseline = store.get_snapshot(owner)
@@ -116,6 +119,8 @@ async def test_query_cannot_bypass_mutation_clarification_or_pending_edit(store,
     items = [report_query()] if mode == 'edit' else [first, report_query()]
     if mode == 'changed_clarification':
         items = [first, clarify(), report_query()]
+    elif mode == 'report_to_mutation':
+        items = [clarify(), first, clarify(), report_query()]
     outputs = iter(items)
     client = client_for(monkeypatch, lambda request: httpx.Response(200, json=response(next(outputs))))
     try:
@@ -131,6 +136,9 @@ async def test_query_cannot_bypass_mutation_clarification_or_pending_edit(store,
         answer = 'from the pool' if mode == 'funding' else 'today'
         if mode == 'changed_clarification':
             await flow.answer(owner, 'reporting period instead', ANSWERED)
+        elif mode == 'report_to_mutation':
+            await flow.answer(owner, 'describe a mutation', ANSWERED)
+            await flow.answer(owner, 'reporting period again', ANSWERED)
         output = await flow.answer(owner, answer, ANSWERED)
         assert 'query' not in output
         assert store.get_snapshot(owner) == baseline
@@ -158,5 +166,40 @@ async def test_invalid_query_after_report_clarification_remains_a_question(store
         assert store.get_snapshot(owner) == baseline and store.get_pending(owner) is None
         state = await flow.graph.aget_state(flow.config(owner, await flow._active(owner)))
         assert state.next and state.values['question']
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize('report', ['spending', 'calendar'])
+async def test_actual_router_graph_query_restart_uses_original_day_or_month(store, monkeypatch, report):
+    owner = onboard(store, uuid4().int % (2**62))
+    receipt = datetime(2026, 9, 30, 18, 29, tzinfo=timezone.utc)
+    reply = receipt + timedelta(minutes=2)
+    for stamp, amount in ((receipt, '3'), (reply, '5')):
+        review = store.propose(owner, [expense(amount)], stamp)
+        store.confirm(owner, review['request_id'], review['revision'], stamp)
+    before = store.get_snapshot(owner)
+    query = report_query(report=report, bucket_name=None if report == 'calendar' else 'Travel')
+    outputs = iter([clarify(), query])
+    client = client_for(monkeypatch, lambda request: httpx.Response(200, json=response(next(outputs))))
+    try:
+        url = os.environ['BUDGET_TEST_DATABASE_URL']
+        async with postgres_checkpointer(url, schema='test_w6_workflow') as saver:
+            flow = BudgetWorkflow(store, client, saver)
+            route = ConversationRouter(store, flow, ReportService(store))
+            initial = await route.dispatch(owner, 'Show spending' if report == 'spending' else 'Show calendar',
+                                           receipt, receipt)
+            assert 'reporting period' in initial['text'] and initial['review'] is None
+        async with postgres_checkpointer(url, schema='test_w6_workflow') as saver:
+            flow = BudgetWorkflow(store, client, saver)
+            route = ConversationRouter(store, flow, ReportService(store))
+            resolved = await route.dispatch(owner, 'today', reply, reply)
+            if report == 'spending':
+                assert '2026-09-30 to 2026-09-30' in resolved['text']
+                assert 'Total spent: ₹3.00' in resolved['text']
+            else:
+                assert resolved['text'] == 'September 2026'
+            assert resolved['query'] == query['query'] and 'query_received_at' not in resolved
+            assert store.get_snapshot(owner) == before and store.get_pending(owner) is None
     finally:
         await client.close()

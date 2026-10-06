@@ -1,6 +1,6 @@
 # Implementation progress
 
-## Current verified integration stage
+## Historical eight-component integration baseline
 
 All eight current-wave workers exited 0 and their source contributions are integrated on main. W3/W5/W6 were independently exercised by the coordinator before cherry-pick: onboarding/access **49 passed**, AI **111 passed**, durable workflow **18 passed**. Exit 0 alone was not treated as acceptance. Integrated commits: W3 `cde4707`, W5 `0b3656e`, W6 `492405b`.
 
@@ -36,7 +36,11 @@ Full source/test Ruff and Git whitespace checks passed. Local CI YAML was update
 
 All five new R1–R5 agents failed with exit 1 on `gpt-6.1-sol` token-rate limits; all original logs/status files and partial worktree files are preserved. None completed its assignment. The coordinator inspected R1's saved tests, reproduced failures and implemented startup/configuration. Main commit `c70de3a` contains the recovered code and `docs/R1_EVIDENCE.md`. Independent main readback: **22 targeted startup/settings tests passed** using approved test_w1 PostgreSQL and controlled real Telegram SDK; full source/test Ruff and whitespace checks passed. This selected result is not additive to the historical complete regression and does not prove assembled application acceptance.
 
-R2's partial ingress tests were inspected and executed: **8 failed, 7 passed**, exposing unfinished invite/revocation/actor/callback checks. R3/R4/R5 have incomplete preserved conversation/acceptance/release files, not accepted deliverables. No live agent remains from the first R wave.
+R2 retry `proc_2680fa7d5857` exited 0 and returned commit `be8419f2392f9f7cbdb0dfb8019b194de372d85b`. Coordinator reran its ingress/lifecycle suites: **41 passed**, targeted Ruff/whitespace checks passed. However, an independent bounded review **failed** on a concrete stale unbound setup Cancel callback that cancels a newer draft/review. Coordinator reproduced it with a real PostgreSQL regression (**1 failed**); R2 merge is held pending focused repair `deleg_c55a257c` and fresh review. Evidence: `docs/R2_COORDINATOR_REVIEW.json`. A worker exit 0 is not acceptance.
+
+R3 retry `proc_467b1abac6a9` returned `9c54c44fc562a1a17dc8c29212a7e9de0919a4d1` and initially passed 75 selected tests. Its first independent review failed on broad exception masking, with four reproduced failures preserved. Focused repair `deleg_20347444` returned commit `5f5a4af87e985a10041edffd7078206d602dd001`; coordinator independently reran **93 conversation/dependency/page tests** and **58 report/calendar tests**, all passed, plus Ruff/whitespace/static checks. A separate fresh bounded review **passed** the repaired component with no concerns/errors. The earlier failed review remains historical. The repair distinguishes invalid input from dependency failures and consumes original-receipt metadata for workflow queries. R3 component is integrated on main as `6582cad` and `7d058ff`; coordinator reran **151 main conversation/error/report/calendar tests**, all passing. The actual durable graph/router clarification seam below is now verified; R2 private-controller wiring and complete application acceptance remain pending.
+
+The workflow clarification repair returned main commit `24f9965dec83884e41987befa957a1f6868f455a`. Coordinator independently reran **33 affected tests**, then a separate bounded independent follow-up **passed** the exact repair. After R3 integration, **2 actual router + PostgreSQL checkpoint restart + Responses SDK controlled HTTP cases passed** across midnight/month-end with original receipt rendering. A report -> mutation -> report origin-switch negative was added; final affected workflow/clarification suites returned **36 passed**, and startup/settings regression **22 passed**, Ruff/whitespace passed. Initial bucket-only report clarification remains intentionally ineligible without trusted intent; Cancel and submit a complete report. Earlier failed review preserved in `docs/QUERY_COORDINATOR_REVIEW.json`. R4/R5 remain incomplete preserved acceptance/release files, not accepted deliverables. Original R1–R5 logs retain first-attempt quota failures.
 
 ## Remaining release work
 

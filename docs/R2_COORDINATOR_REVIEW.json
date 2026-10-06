@@ -1,0 +1,35 @@
+{
+  "scope": "Returned R2 private ingress and guided setup/controller lifecycle",
+  "worker_attempt": "r2-retry1",
+  "worker_process": "proc_2680fa7d5857",
+  "worker_commit": "be8419f2392f9f7cbdb0dfb8019b194de372d85b",
+  "worker_exit_code": 0,
+  "coordinator_targeted_result": {"passed": 41, "failed": 0, "schema": "test_w2", "lint_passed": true},
+  "independent_review": {
+    "provider": "azure-kiro-sol61",
+    "model": "gpt-6.1-sol",
+    "effort": "low",
+    "budget_seconds": 180,
+    "passed": false,
+    "security_concerns": [],
+    "logic_errors": [
+      {
+        "file": "src/budget_bot/controller.py",
+        "location": "_dispatch setup:cancel callback route",
+        "issue": "Unbound old setup cancellation button can cancel a newer draft or review.",
+        "required_fix": "Bind setup callbacks to the originating draft request and validate atomically under the onboarding lock before any mutation."
+      }
+    ],
+    "evidence": ".coordination/r2-independent-review.log"
+  },
+  "coordinator_reproduction": {
+    "test": "tests/test_controller_setup_replay.py::test_old_setup_cancel_button_cannot_cancel_newer_setup_review",
+    "failed": 1,
+    "failure": "Replaying an old generated setup Cancel callback removed the newer pending review.",
+    "evidence": ".coordination/r2-setup-replay-red.xml"
+  },
+  "integration_status": "held pending repair and fresh review",
+  "repair_delegation": "deleg_c55a257c",
+  "release_signoff": false,
+  "live_telegram_or_ai_test": false
+}

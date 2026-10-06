@@ -1,15 +1,16 @@
 # Telegram budget bot
 
-**Current stage: original eight worker contributions integrated; executable startup has now been implemented and coordinator-tested after the remaining-work agent quota failures. Controller/onboarding/NL/calendar assembly and release acceptance remain unfinished. The bot is not running and this project is not ready for release.**
+**Current stage: startup and R3 conversation/report/calendar components are integrated and coordinator-tested. R2 private-controller/setup replay repair is still pending, so application assembly and release acceptance remain unfinished. The bot is not running and this project is not ready for release.**
 
 Invite-only, multi-user virtual INR budgeting through Telegram, with isolated owners, central pool and buckets, reviewed financial actions, audited corrections, targets, spending reports, and a recorded-expense calendar.
 
 ## Verified locally
 
-- Final frozen-source regression: **435 passed, 1 known strict expected failure**, across all **25** current test files exactly once. The expected failure is `/calendar` controller dispatch.
+- Historical eight-component frozen regression: **435 passed, 1 strict expected failure**, across **25** test files at that baseline. It predates the new startup/router/clarification changes; `/calendar` private-controller acceptance awaits R2 integration.
+- R3 report/calendar/router repair is now integrated: **151 selected main tests passed**. Actual router + durable PostgreSQL graph + controlled Responses SDK report clarification preserves original dates across checkpoint restart and midnight/month-end; **36 affected workflow tests passed**. Independent component and clarification follow-up reviews passed, with earlier failed reviews preserved. These are overlapping selected results, not a fresh complete-main aggregate.
 - Real PostgreSQL planning/storage, guided setup/access and durable LangGraph workflows tested. Cross-worker seam tests use the real OpenAI Responses SDK with controlled HTTP, not live AI or owner financial data.
 - Financial changes remain proposals until explicit Confirm; undo/correction requires explicit owner-scoped record selection. Funding clarification accepts an explicit pool/income choice instead of looping.
-- Source/test Ruff and Git whitespace checks passed. Local CI configuration enumerates all current test files in the required isolated schemas; remote CI has not run.
+- Source/test Ruff and Git whitespace checks passed. Historical CI enumeration covered its baseline; R5 must refresh it for newly added test files before publication. Remote CI has not run.
 - Historical wheel/source distribution builds excluded private/worktree paths. **`budget_bot.main` now exists; startup/configuration passed 22 coordinator tests against real test PostgreSQL and controlled Telegram SDK.** Final assembly still needs a fresh exhaustive test/build/package run.
 
 See [Implementation status](docs/IMPLEMENTATION_STATUS.md) for evidence, review limits and remaining work.
