@@ -77,10 +77,10 @@ def _expense_feedback(state, tx, received_at, result):
 
 
 def _target_feedback(state, name, month, result):
-    versions = [v for v in state.get("targets", [])
-                if v["bucket_name"] == name and v["effective_month"] <= month]
+    history = [v for v in state.get("targets", []) if v["bucket_name"] == name]
+    versions = [v for v in history if v["effective_month"] <= month]
     target = (max(versions, key=lambda v: (v["effective_month"], v["revision"]))["amount"]
-              if versions else state["buckets"][name].get("target"))
+              if versions else None if history else state["buckets"][name].get("target"))
     if target is None:
         return
     spending = sum(t["amount"] for t in state["transactions"]
@@ -115,10 +115,13 @@ def _set_target(state, action, received_at, result):
 
 def _apply(state, effects, transaction_id, postings):
     for account, delta in effects.items():
+        balance = _balance(state, account) + delta
+        if not -(2**63) <= balance <= 2**63 - 1:
+            raise BudgetError("invalid_amount", "Account balance exceeds supported storage range")
         if account == "pool":
-            state["pool"] += delta
+            state["pool"] = balance
         else:
-            state["buckets"][account]["balance"] += delta
+            state["buckets"][account]["balance"] = balance
         if delta:
             postings.append({"account": account, "amount": delta, "transaction_id": transaction_id})
 
@@ -249,7 +252,8 @@ def plan(snapshot: dict, actions: list[dict], received_at) -> dict:
               "warnings": [], "actions": [], "summary": []}
     batch_id = str(uuid4())
     for action in actions:
-        if not isinstance(action, dict) or action.get("type") not in FIELDS:
+        if (not isinstance(action, dict) or not isinstance(action.get("type"), str)
+                or action["type"] not in FIELDS):
             raise BudgetError("unsupported_action", "Unsupported budgeting action")
         kind = action["type"]
         if set(action) - FIELDS[kind] - {"type"}:

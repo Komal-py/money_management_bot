@@ -64,7 +64,8 @@ def parse_money(value: str, allow_zero: bool = False) -> int:
     amount_str = amount_str.replace(",", "")
     
     whole, _, fraction = amount_str.partition(".")
-    if len(whole.lstrip("0")) > 9:
+    whole = whole.lstrip("0") or "0"
+    if len(whole) > 9:
         raise BudgetError("invalid_amount", "Amount exceeds INR 999999999.99")
     paise = int(whole) * 100 + int(fraction.ljust(2, "0") or "0")
     if paise > MAX_AMOUNT:

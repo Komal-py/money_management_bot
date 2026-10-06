@@ -14,7 +14,10 @@ def local_today(received_at: datetime, timezone: str) -> date:
         zone = ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, TypeError, ValueError):
         raise BudgetError("invalid_timezone", "Unknown timezone") from None
-    return received_at.astimezone(zone).date()
+    try:
+        return received_at.astimezone(zone).date()
+    except OverflowError:
+        raise BudgetError("invalid_date", "Local date is outside the supported calendar") from None
 
 
 def resolve_date(expression, received_at: datetime, timezone: str) -> date:
@@ -22,6 +25,8 @@ def resolve_date(expression, received_at: datetime, timezone: str) -> date:
     if expression is None or expression == "today":
         return today
     if expression == "yesterday":
+        if today == date.min:
+            raise BudgetError("invalid_date", "Yesterday is outside the supported calendar")
         return today - timedelta(days=1)
     if isinstance(expression, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", expression):
         try:

@@ -1,6 +1,7 @@
 """Tests for domain.money module - TDD cycle evidence."""
 
 import pytest
+from hypothesis import given, settings, strategies as st
 from budget_bot.domain.money import parse_money, format_money
 from budget_bot.domain.errors import BudgetError
 
@@ -142,3 +143,21 @@ def test_money_validates_grouping_and_supported_range_without_rounding():
             parse_money(value)
     assert parse_money("999999999.99") == 99999999999
     assert parse_money("99,99,99,999.99") == 99999999999
+
+
+@pytest.mark.parametrize("suffix,expected", [("1.01", 101), ("0", 0)])
+def test_leading_zero_padding_does_not_escape_exact_money_parser(suffix, expected):
+    assert parse_money("0" * 5000 + suffix, allow_zero=True) == expected
+
+
+@settings(max_examples=100, derandomize=True, database=None)
+@given(paise=st.integers(0, 99999999999))
+def test_supported_amounts_round_trip_without_rounding(paise):
+    assert parse_money(format_money(paise), allow_zero=True) == paise
+
+
+@pytest.mark.parametrize("value", ["1000000000.00", "1,000,000,000.00", "1,00,00,00,000.00", "0" * 5000 + "1000000000"])
+def test_money_limit_rejects_one_paise_above_max_in_all_supported_groupings(value):
+    with pytest.raises(BudgetError) as exc:
+        parse_money(value)
+    assert exc.value.code == "invalid_amount"

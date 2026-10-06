@@ -19,3 +19,19 @@ def test_dates_use_trusted_receipt_timezone_and_reject_ambiguous_dates():
         dates.local_today(received.replace(tzinfo=None), "UTC")
     with pytest.raises(BudgetError):
         dates.local_today(received, "Not/AZone")
+
+
+def test_yesterday_before_supported_calendar_is_a_domain_error():
+    with pytest.raises(BudgetError) as exc:
+        dates.resolve_date("yesterday", datetime.min.replace(tzinfo=timezone.utc), "UTC")
+    assert exc.value.code == "invalid_date"
+
+
+@pytest.mark.parametrize("received,zone", [
+    (datetime.min.replace(tzinfo=timezone.utc), "America/New_York"),
+    (datetime.max.replace(tzinfo=timezone.utc), "Asia/Kolkata"),
+])
+def test_timezone_conversion_outside_calendar_is_a_domain_error(received, zone):
+    with pytest.raises(BudgetError) as exc:
+        dates.local_today(received, zone)
+    assert exc.value.code == "invalid_date"
