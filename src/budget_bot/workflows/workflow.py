@@ -117,6 +117,8 @@ class State(TypedDict, total=False):
     edit: bool
     nl: bool
     funding_resolved: bool
+    funding_source: str | None
+    missing_fields: list
     field_index: int
     field_name: str
 
@@ -326,8 +328,10 @@ class BudgetWorkflow:
         if answer is not None:
             prompt += '\nCurrent question: ' + (state.get('question') or 'Edit the current review')
             prompt += '\nOwner answer: ' + answer
+        context = {'funding_source': state['funding_source']} if state.get('funding_source') else {}
         output = await self.interpreter.interpret(prompt, list(snapshot['buckets']),
-                                                   datetime.fromisoformat(state['received']), snapshot['timezone'])
+                                                   datetime.fromisoformat(state['received']), snapshot['timezone'],
+                                                   **context)
         required = {'schema_version', 'kind', 'actions', 'missing_fields', 'clarification_question', 'query'}
         if (not isinstance(output, dict) or set(output) != required or output['schema_version'] != 1
                 or isinstance(output['schema_version'], bool)
@@ -341,8 +345,14 @@ class BudgetWorkflow:
         if output['kind'] == 'mutation' and (not output['actions'] or output['missing_fields']):
             fail('invalid_model_output', 'The mutation is incomplete. Use commands or try again.')
         for action in output['actions']:
+            allowed = {'type'} | FIELDS.get(action.get('type'), set()) if isinstance(action, dict) else set()
+            if isinstance(action, dict) and action.get('type') in {'undo', 'correct'}:
+                allowed.add('reference')
+                if 'reference' in action and (not isinstance(action['reference'], str)
+                                               or not action['reference'].strip()):
+                    fail('invalid_model_output', 'Describe the transaction to select.')
             if (not isinstance(action, dict) or action.get('type') not in FIELDS
-                    or set(action) - ({'type'} | FIELDS[action['type']])):
+                    or set(action) - allowed):
                 fail('invalid_model_output', 'The interpretation contained unsupported action fields.')
         return output
 
@@ -393,6 +403,7 @@ class BudgetWorkflow:
             if ambiguous and output['kind'] == 'mutation' and not state.get('funding_resolved'):
                 question = 'Is this allocation from existing pool money, or new income followed by allocation?'
                 return {'question': question, 'mode': 'interpret', 'actions': [],
+                        'missing_fields': ['funding_source'],
                         'output': self._message(question), 'route': 'wait'}
             if output['kind'] == 'query':
                 return {'output': self._query(output['query'], snapshot), 'route': 'end'}
@@ -401,6 +412,7 @@ class BudgetWorkflow:
             if output['kind'] == 'clarification':
                 question = output['clarification_question'] or 'Please clarify the missing budgeting details.'
                 return {'question': question, 'mode': 'interpret', 'actions': output['actions'],
+                        'missing_fields': output['missing_fields'],
                         'output': self._message(question), 'route': 'wait'}
             state = {**state, 'actions': output['actions'], 'mode': 'actions'}
         actions = copy.deepcopy(state['actions'])
@@ -428,7 +440,7 @@ class BudgetWorkflow:
                 if not candidates:
                     fail('unknown_transaction', 'There are no active transactions to select.')
                 # No model IDs, batch IDs or last selector can select a record on the owner's behalf.
-                for field in ('transaction_id', 'batch_id', 'last'):
+                for field in ('transaction_id', 'batch_id', 'last', 'reference'):
                     action.pop(field, None)
                 question = 'Select the transaction ID to undo or correct:\n' + '\n'.join(
                     f"{t['id']} | {t['date']} | {t['type']} | {t['description']} | {t['bucket']} | {t['amount']} paise"
@@ -490,6 +502,7 @@ class BudgetWorkflow:
                         'nl': False, 'mode': 'actions', 'route': 'prepare'}
             question = 'Describe the replacement actions for this review, or cancel.'
             return {'question': question, 'mode': 'edit', 'output': self._message(question),
+                    'funding_source': None, 'missing_fields': [],
                     'route': 'wait', 'edit': True, 'original': 'Current review: ' + str(state['review']['actions'])}
         answer = reply.get('answer')
         if not isinstance(answer, str) or not answer.strip():
@@ -518,14 +531,23 @@ class BudgetWorkflow:
             else:
                 actions[state['bucket_index']]['bucket_name'] = name
             return {'actions': actions, 'mode': 'actions', 'question': None, 'route': 'prepare'}
+        source = state.get('funding_source')
+        if 'funding_source' in state.get('missing_fields', []):
+            source = {'pool': 'pool', 'from the pool': 'pool', 'existing pool': 'pool',
+                      'existing pool money': 'pool', 'new income': 'income',
+                      'income': 'income'}.get(answer.strip().casefold())
+            if source is None:
+                fail('invalid_answer', 'Choose existing pool money or new income, or cancel.')
+        state = {**state, 'funding_source': source}
         snapshot = await asyncio.to_thread(self.store.get_snapshot, state['owner'])
         output = await self._interpret(state, snapshot, answer)
         if output['kind'] == 'clarification':
             question = output['clarification_question'] or 'Please clarify the missing budgeting details.'
             return {'question': question, 'output': self._message(question), 'route': 'wait',
+                    'missing_fields': output['missing_fields'], 'funding_source': source,
                     'original': state.get('original', '') + '\nOwner answer: ' + answer}
         if output['kind'] != 'mutation':
             fail('invalid_answer', 'Complete the current budgeting actions or cancel first.')
         return {'actions': output['actions'], 'mode': 'actions', 'nl': True, 'question': None,
                 'received': reply['now'] if state.get('edit') else state['received'], 'route': 'prepare',
-                'funding_resolved': True}
+                'funding_resolved': True, 'funding_source': source, 'missing_fields': []}

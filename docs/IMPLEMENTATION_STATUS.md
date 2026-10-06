@@ -1,43 +1,43 @@
 # Implementation progress
 
-## Current coordinator verification
+## Current verified integration stage
 
-Implementation remains authorized. Main includes settings/private controller boundaries, financial planning (W1), PostgreSQL persistence/migrations (W2), command parsing/durable Telegram transport (W4), deterministic reports/calendar components (W7), and W8's frozen-baseline acceptance/review/CI/runbook artifacts.
+All eight current-wave workers exited 0 and their source contributions are integrated on main. W3/W5/W6 were independently exercised by the coordinator before cherry-pick: onboarding/access **49 passed**, AI **111 passed**, durable workflow **18 passed**. Exit 0 alone was not treated as acceptance. Integrated commits: W3 `cde4707`, W5 `0b3656e`, W6 `492405b`.
 
-`python .private/verify_wave.py` returned exit 0 after exercising **all 17 current main test files exactly once**, sequentially in their authorized schemas. Parsed JUnit: **252 collected, 251 passed, 0 failures, 0 errors, 1 strict expected failure**. The expected failure is missing `/calendar` controller routing, not passing acceptance. Source/test/migration/configuration hashes were unchanged throughout verification. Evidence: ignored `.coordination/wave-verification/summary.json` and per-schema XML/logs.
+Coordinator added real PostgreSQL/LangGraph/Responses-SDK/presentation seam tests. Undo/correct drafts now reach explicit owner-scoped transaction selection before review, with no model-selected record IDs. A returned review's concrete funding-clarification loop was reproduced red for both pool and income answers, then repaired using structured persisted owner context. Unknown answers keep the question open, workflow re-instantiation resumes it, and financial balances remain unchanged until explicit Confirm. Correction money is compared using the planner's canonical two-decimal representation.
 
-| Schema | Verified result |
+Complete final frozen-source regression: `python .private/verify_wave.py` exit 0; **25 test files exactly once, 436 collected, 435 passed, 0 failures/errors, 1 strict expected failure**. Calendar controller routing remains the expected failure, not passing acceptance. Source/test/migration/config hashes were stable across the final run, including the packaging allowlist. Evidence: ignored `.coordination/wave-verification/summary.json` and per-schema XML/logs.
+
+| Approved schema | Result from complete regression |
 |---|---|
-| test_w2: financial core, settings, controller, storage | 115 passed |
-| test_w4: command/transport and real-store transport integration | 67 passed |
-| test_w7: reports/calendar and real-store report integration | 58 passed |
-| test_w8: independent baseline acceptance | 9 passed, 1 strict xfailed |
-| test_integration: real planner/store tracer bullets | 2 passed |
+| test_w2 financial core/settings/controller/storage | 115 passed |
+| test_w3 onboarding/access | 49 passed |
+| test_w5 controlled Responses SDK/AI/rendering | 111 passed |
+| test_w6 real durable workflow and cross-worker seams | 24 passed |
+| test_w4 Telegram command/transport/store seams | 67 passed |
+| test_w7 reports/calendar components | 58 passed |
+| test_w8 independent baseline acceptance | 9 passed, 1 strict xfailed |
+| test_integration planner/store | 2 passed |
 
-Full `ruff check src tests` and `git diff --check` passed. Fresh independent review of the exact coordinator production diff passed with no security concerns or logic errors (`docs/COORDINATOR_REVIEW.json`). Its nonblocking suggestions are covered by a real-store 25-part/two-cycle delivery regression and the documented due_at/retry ordering limit. Reviewer did not rerun tests; coordinator did. This verifies the current integrated source, not a finished runnable bot or live Telegram/AI service; no release security sign-off or successful distribution build is claimed.
+Full source/test Ruff and Git whitespace checks passed. Local CI YAML was updated to enumerate all 25 current test files exactly once in their required schemas; parsed enumeration has no omissions, duplicates or extras. No remote CI execution is claimed.
 
-## Concurrent wave: returned contributions
+## Review evidence
 
-| Worker | Process evidence | Coordinator disposition |
-|---|---|---|
-| W1 financial hardening | Exit 0 | Source e510153 integrated as caa9db1; 72 targeted tests independently passed, then included in the frozen-tree regression. |
-| W2 persistence hardening | Exit 0 | Source 77c68d3 integrated as fb6e2bd; 30 targeted tests independently passed. Target IDs/month-local revisions and monotonic durable Telegram offsets verified. |
-| W4 transport hardening | Exit 0 | Source ba2a276 integrated as 8b8a960; 64 targeted tests independently passed before coordinator fixes. Final transport regression includes two new bot-isolation/ordered-claim regressions. |
-| W7 report integration | Exit 0 | Source da2fa12 integrated as bc254cb; 58 targeted tests independently passed. Main integration exposed stale expectations about cross-month revision numbering; reconciled against the actual planner/store contract. |
-| W8 review/CI/runbook | Exit 0 | Source 60b50ba integrated as 9d768f6; 9 acceptance tests pass with one known calendar xfail. Review applies to frozen fdcf05e, not unseen sibling work. Remote CI has not run. |
-| W3 onboarding/access | Exit 0 observed in process readback | Saved source 8817faf remains in worker worktree, not independently accepted or integrated yet. |
-| W5 AI and W6 LangGraph | Last process readback: running | Completion/artifact acceptance is not inferred. |
+- `docs/COORDINATOR_REVIEW.json`: previous transport bot-scope/ordered-claim diff passed independent review; claim-boundary regression and retry-order limitations retained.
+- `docs/WORKER_SEAMS_REVIEW.json`: onboarding/AI/workflow review `deleg_88fc132c` **failed on provider HTTP 429**, so it is not a completed sign-off. Its partial concrete funding finding was independently reproduced and fixed.
+- A separate bounded 180-second, low-effort review through the already-approved `azure-kiro-sol61` route passed the exact coordinator AI/workflow diff and current files. No security concerns, logic errors or suggestions; read-only code review, not live execution or full release sign-off. Evidence: ignored `.coordination/worker-seams-review.log`.
+- W8's baseline review remains limited to its frozen baseline, not unseen sibling source.
 
-Main integration initially failed one gap-offset expectation and one old target uniqueness constraint. Applied Alembic head only to approved idle test schemas test_w4/test_w7/test_w8/test_integration; exact readback verified revision 0002_target_month_revision, new constraint and unchanged target-audit row counts (including 22 existing rows in test_w7). Production schema/database was not migrated.
+## Packaging evidence and limitation
 
-Coordinator then reproduced two genuine transport defects with failing tests: another bot's inbox/completion/outbox was unscoped, and reply chunks were ordered by random UUID. Bot-scoped ingress/completion/claim filters and persisted position ordering now pass real-PostgreSQL regression. This does not guarantee global delivery order across simultaneous transports or retries; initial production topology remains one bot poller per project schema. Transport tests use the real Telegram SDK with controlled request adapters, not live Telegram.
+`uv build --out-dir .coordination/dist` produced a wheel and source distribution. Archive inspection initially caught nested worker example files in the source distribution. A root-anchored source allowlist/exclusions removed them; final archive inspection found **no .env/private/coordination/worktree paths**, and every wheel Python file matches current source bytes. Build success does **not** make this a runnable product: `budget_bot/main.py` is still absent while the console script points to it. No package is delivered or published as runnable.
 
-## Remaining and runtime state
+## Remaining release work
 
-Integrate/verify onboarding, AI and durable LangGraph contributions; wire startup and controller routes; resolve W8's remaining concrete findings; update CI for all new schema-specific suites; exercise complete application acceptance and packaging; perform bounded live smoke checks and publish/read back the approved repository. Calendar controller dispatch remains a known failure. W8's prior no-isolation build failed because hatchling was unavailable; build success has not been established. **The bot application is not running; no GitHub push has occurred.**
+Wire executable startup, onboarding/access controller paths, AI/graph presentation and query routing; fix `/calendar` dispatch; exercise complete application acceptance; run release security/dependency gates and actual startup/live synthetic smoke; then publish/read back the approved repository and verify remote CI. The bot application is **not running** and **no GitHub push has occurred**.
 
-The earlier 147-test baseline and failed first-wave worker exits are historical evidence, not current totals. Useful W1/W2 saved code from that wave was recovered and verified. The later all-eight concurrency request superseded dependency waves; workers were launched together in isolated worktrees with low/medium effort and 1800-second limits. Process success is not component acceptance. No duplicate workers were launched for the repeated request.
+## Authorization/resource boundaries
 
-## Approvals and resource boundaries
+Implementation remains authorized in `C:/Users/FL_LPT-657/Projects/telegram_bot`. No live owner finances were recorded. Tests use only approved existing PostgreSQL resources and isolated schemas; no new server/container was created. Live Telegram/AI calls were not made by these integrated seam tests; the Responses SDK HTTP layer is controlled. The review retry used an existing approved agent route with low effort and a short runtime cap; tariffs remain unverified. Source Hermes configuration/credentials are unchanged. Project credentials/private files remain ignored. The three-hour wake-lock has expired; no renewal or permanent sleep-setting change.
 
-Project-only AI credential/config copy was explicitly approved and completed; credentials remain ignored and source Hermes configuration unchanged. Dedicated restricted app/test resources use the approved existing PostgreSQL server; only project-related files/resources are accessed. The three-hour temporary wake-lock expired normally; no renewal or permanent power-plan change. Model tariffs are unverified; no cheaper-route or dollar-cost claim.
+Earlier failed worker attempts, the 147-test baseline and the 251-pass integrated transport stage are historical, not additive current totals. Reused worker work was preserved, and no duplicate eight-worker wave was launched.

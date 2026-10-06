@@ -140,12 +140,16 @@ async def test_redacted_bucket_resolves_only_to_unique_original(monkeypatch):
 @pytest.mark.parametrize('action', [dict(type='undo', last=True),
     dict(type='undo', reference='Metro yesterday'),
     dict(type='correct', reference='Metro yesterday', changes={'amount_inr': '35'})])
-async def test_nl_reference_selection_never_returns_executable_actions(monkeypatch, action):
+async def test_nl_reference_drafts_never_return_backend_record_selectors(monkeypatch, action):
     client = client_for(monkeypatch, lambda request: httpx.Response(200, json=response(mutation(action))))
     try:
         value = await client.interpret('Undo or correct Metro yesterday', ['Travel'], NOW, 'Asia/Kolkata')
-        assert value['kind'] == 'clarification' and value['actions'] == []
-        assert value['missing_fields'] == ['transaction_reference']
+        assert value['kind'] == 'mutation' and len(value['actions']) == 1
+        draft = value['actions'][0]
+        assert draft['type'] == action['type']
+        assert not {'transaction_id', 'batch_id', '_selected'} & set(draft)
+        if action['type'] == 'correct':
+            assert draft['changes'] == action['changes']
     finally:
         await client.close()
 

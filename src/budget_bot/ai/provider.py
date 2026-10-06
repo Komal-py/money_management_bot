@@ -21,6 +21,8 @@ Supported: income into pool, allocation from pool, bucket transfer, expense,
 create bucket, monthly target, undo/correct, balances/spending/calendar queries.
 Opening money is backend-only. Unsupported features must be unsupported.
 Ambiguous 'add money to a bucket' MUST clarify existing pool versus new income.
+An explicit funding_source in the input is the owner's answer to that question:
+pool means allocate existing pool money; income means income then allocation.
 New income into a bucket needs income then allocation in one reviewed batch.
 Never invent a bucket; suggest an existing bucket or ask to select/create one.
 Undo/correct use a human description/reference, never transaction/owner/batch IDs.
@@ -89,7 +91,8 @@ class AIInterpreter:
     async def close(self):
         await self._client.close()
 
-    async def interpret(self, text: str, bucket_names: list[str], received_at: datetime, timezone: str) -> dict:
+    async def interpret(self, text: str, bucket_names: list[str], received_at: datetime, timezone: str,
+                        *, funding_source: str | None = None) -> dict:
         day = local_today(received_at, timezone).isoformat()
         safe_text = redact(text, (self._api_key,))
         # Only names and the local bookkeeping date, never IDs, balances, targets,
@@ -99,9 +102,13 @@ class AIInterpreter:
             safe_name = redact(name, (self._api_key,))
             originals.setdefault(safe_name.strip().casefold(), set()).add(name)
         names = list(dict.fromkeys(redact(name, (self._api_key,)) for name in bucket_names))
-        if _ambiguous_funding(safe_text):
+        if funding_source is not None and funding_source not in ('pool', 'income'):
+            return _clarify(['funding_source'], names)
+        if _ambiguous_funding(safe_text) and funding_source is None:
             return _clarify(['funding_source'], names)
         payload = dict(message=safe_text, bucket_names=names, local_date=day, timezone=timezone)
+        if funding_source is not None:
+            payload['funding_source'] = funding_source
         try:
             response = await self._client.responses.create(
                 model=self._model, instructions=_INSTRUCTIONS,
@@ -145,7 +152,9 @@ class AIInterpreter:
         known = {name.strip().casefold() for name in names}
         for action in value['actions']:
             if action['type'] in {'undo', 'correct'}:
-                return _clarify(['transaction_reference'], names)
+                # This is an unbound draft, never a backend record selector.
+                # W6 must show owner-scoped candidates and bind explicit selection.
+                continue
             if action['type'] == 'create_bucket':
                 # A model cannot manufacture consent to create a suggested bucket.
                 if (not re.search(r'\b(?:create|make|new)\b', safe_text, re.I)

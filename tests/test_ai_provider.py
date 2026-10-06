@@ -147,8 +147,9 @@ async def test_backend_must_resolve_correction_reference(monkeypatch):
         dict(type='correct', reference='Metro yesterday', changes={'amount_inr': '350'})))))
     try:
         result = await client.interpret('Correct Metro yesterday to 350', ['Travel'], NOW, 'Asia/Kolkata')
-        assert result['kind'] == 'clarification'
-        assert result['missing_fields'] == ['transaction_reference']
-        assert result['actions'] == []
+        assert result['kind'] == 'mutation'
+        assert result['actions'] == [dict(type='correct', reference='Metro yesterday', changes={'amount_inr': '350'})]
+        assert 'transaction_id' not in result['actions'][0]
+        assert 'batch_id' not in result['actions'][0]
     finally:
         await client.close()

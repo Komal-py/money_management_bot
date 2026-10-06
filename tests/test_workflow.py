@@ -109,7 +109,7 @@ class ControlledInterpreter:
         self.outputs = iter(outputs)
         self.calls = []
 
-    async def interpret(self, text, bucket_names, received_at, timezone):
+    async def interpret(self, text, bucket_names, received_at, timezone, *, funding_source=None):
         self.calls.append((text, bucket_names, received_at, timezone))
         return next(self.outputs)
 
