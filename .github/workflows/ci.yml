@@ -85,7 +85,7 @@ jobs:
         run: >-
           uv run --no-sync pytest -p pytest_asyncio.plugin
           tests/test_telegram_commands.py tests/test_telegram_privacy.py tests/test_telegram_transport.py
-          tests/test_telegram_store_integration.py -q
+          tests/test_telegram_store_integration.py tests/test_telegram_menu.py -q
       - name: Reports and calendar components (test_w7 only)
         env:
           BUDGET_TEST_SCHEMA: test_w7
@@ -100,7 +100,7 @@ jobs:
           uv run --no-sync pytest -p pytest_asyncio.plugin
           tests/test_storage_planner.py
           tests/test_controller.py tests/test_controller_commands.py tests/test_controller_reports.py
-          tests/test_controller_ingress.py tests/test_controller_lifecycle.py tests/test_controller_setup_replay.py
+          tests/test_controller_ingress.py tests/test_controller_lifecycle.py tests/test_controller_setup_replay.py tests/test_controller_menu.py
           tests/test_domain_dates.py tests/test_domain_money.py tests/test_domain_planner.py -q
       - name: Startup and settings (test_w1 only)
         env:

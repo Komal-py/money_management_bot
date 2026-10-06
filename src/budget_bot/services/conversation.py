@@ -43,14 +43,16 @@ class ConversationRouter:
         return output
 
     def menu(self) -> dict:
-        # Commands are already supported by ingress. Do not invent menu callback
-        # protocols or guided financial-entry buttons that ingress cannot handle.
+        # The persistent reply keyboard sends plain text labels that ingress maps
+        # to these same existing commands; it never adds callback protocols.
+        from budget_bot.telegram.menu import main_menu_keyboard
         return {'text': 'Your virtual INR budget\n'
                         'Tell me an expense or money change, or use these commands:\n'
                         '/balance\n/spending today\n/spending week\n/spending month\n/calendar\n'
                         '/help\n/cancel\n'
                         'Every money change needs your review and explicit Confirm. '
-                        'Reports and calendar navigation never change money.', 'keyboard': []}
+                        'Reports and calendar navigation never change money.',
+                'keyboard': main_menu_keyboard()}
 
     def _calendar(self, owner_id, payload):
         if not isinstance(payload, str) or not payload.startswith(('cal:', 'day:')):

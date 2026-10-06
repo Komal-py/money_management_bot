@@ -10,7 +10,7 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.error import TelegramError
 from telegram.request import HTTPXRequest
 
@@ -89,9 +89,12 @@ def create_bot(token):
 def _keyboard(value):
     if value is None or value == []:
         return None
-    if isinstance(value, InlineKeyboardMarkup):
+    if isinstance(value, (InlineKeyboardMarkup, ReplyKeyboardMarkup)):
         return value
     if isinstance(value, dict):
+        if 'keyboard' in value:
+            # Persistent main menu: plain reply buttons that send text, never callbacks.
+            return ReplyKeyboardMarkup.de_json(value, None)
         return InlineKeyboardMarkup.de_json(value, None)
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(text=button['text'],
@@ -102,10 +105,39 @@ def _keyboard(value):
 
 
 class TelegramTransport:
-    def __init__(self, bot, store, controller):
+    def __init__(self, bot, store, controller, *, admin_id=None):
         self.bot = bot
         self.store = store
         self.controller = controller
+        self.admin_id = admin_id
+        self._commands_registered = False
+
+    async def register_commands(self, admin_id=None):
+        """Advertise '/' commands; failures are logged without SDK details.
+
+        Members see the everyday command list in every private chat; only the
+        administrator chat also sees /invite, /users and /revoke. Registration
+        is cosmetic, so a failure never prevents polling. Returns success.
+        """
+        from telegram import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeChat
+
+        from budget_bot.telegram.menu import admin_commands, registered_commands
+
+        def build(pairs):
+            return [BotCommand(name, description) for name, description in pairs]
+
+        try:
+            with _private_sdk_logging():
+                await self.bot.set_my_commands(build(registered_commands()),
+                                               scope=BotCommandScopeAllPrivateChats())
+                if admin_id is not None:
+                    await self.bot.set_my_commands(build(admin_commands()),
+                                                   scope=BotCommandScopeChat(admin_id))
+        except Exception:
+            # Cosmetic only: any SDK/network failure must not stop polling.
+            logger.warning('Telegram command registration failed; continuing without it')
+            return False
+        return True
 
     async def poll_once(self, now):
         """Persist fetched updates before handling; return completed inbox count.
@@ -185,6 +217,11 @@ class TelegramTransport:
     async def run(self, stop_event):
         """Bounded polling cycles with interruptible delay; no Bot startup here."""
         while not stop_event.is_set():
+            if not self._commands_registered:
+                # Cosmetic and idempotent: one attempt per process, never retried
+                # so a Telegram outage cannot starve durable inbox/outbox work.
+                self._commands_registered = True
+                await self.register_commands(self.admin_id)
             now = datetime.now(timezone.utc)
             try:
                 await self.poll_once(now)

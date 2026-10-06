@@ -6,6 +6,10 @@ import re
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from budget_bot.domain.errors import BudgetError
+from budget_bot.telegram import menu
+
+# '/spending' with no period: offer period buttons instead of a syntax error.
+_BARE_SPENDING = re.compile(r'/spending(?:@[A-Za-z0-9_]+)?\s*')
 
 
 class BudgetController:
@@ -158,10 +162,25 @@ class BudgetController:
                     return 'Complete setup first. Send /start to open or resume it.'
                 output = await self._conversation().dispatch(owner, '', received, now, callback_data=data)
                 return output or 'That button is not available. Use /help.'
+            if data.startswith('sp:'):
+                period = menu.parse_spending_callback(data)
+                if period is None:
+                    return 'That button is not available. Use /help.'
+                if not user.get('onboarded'):
+                    return 'Complete setup first. Send /start to open or resume it.'
+                # Read-only: the query is rebuilt from the closed period word only.
+                output = await self._conversation().dispatch(owner, '', received, now,
+                                                             query=menu.spending_query(period))
+                if isinstance(output, str):
+                    output = {'text': output}
+                return {**output, 'keyboard': menu.spending_period_keyboard()}
             return 'That button is not available. Use /help.'
         text = message.get('text', '')
         if not isinstance(text, str) or not text:
             return 'Send a text message or use /help.'
+        # Persistent reply-keyboard buttons send their label as plain text; map an
+        # exact label to the command it stands for so it follows the same path.
+        text = menu.button_command(text) or text
         receipt = message.get('date', int(now.timestamp()))
         try:
             if type(receipt) is not int:
@@ -170,12 +189,16 @@ class BudgetController:
         except (ValueError, OverflowError, OSError):
             return 'That message timestamp is invalid. Please send it again.'
         if text.startswith('/') and self.command_parser:
+            if _BARE_SPENDING.fullmatch(text):
+                if self.onboarding is not None and not user.get('onboarded'):
+                    return self._setup_output(self.onboarding.handle(owner, '/start', now))
+                return menu.spending_period_prompt()
             try:
                 command = self.command_parser(text, received, user['timezone'])
             except CommandError as error:
                 return error.message + '\nSee /help for syntax.'
             if command['kind'] == 'help':
-                return HELP_TEXT
+                return {'text': HELP_TEXT, 'keyboard': menu.main_menu_keyboard()}
             if command['kind'] == 'admin':
                 return self.access.handle_admin(owner, command['command'], command['args'], now)
             if command['kind'] == 'timezone':

@@ -88,7 +88,7 @@ async def build_runtime(settings, *, project_dir=None, bot=None):
         reports, access = ReportService(store), AccessService(store)
         controller = BudgetController(store, workflow, onboarding, reports, access)
         yield Runtime(store, onboarding, reports, access, workflow, controller,
-                      TelegramTransport(bot, store, controller))
+                      TelegramTransport(bot, store, controller, admin_id=settings.telegram_admin_user_id))
 
 
 async def run(settings, project_dir=None):

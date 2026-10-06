@@ -298,8 +298,17 @@ async def test_calendar_day_pages_current_expenses_only_for_caller_owner(store, 
 def test_menu_offers_existing_commands_not_imaginary_callbacks():
     from budget_bot.services.conversation import ConversationRouter
     from budget_bot.telegram.commands import parse_command
+    from budget_bot.telegram.menu import button_command, main_menu_keyboard
     out = ConversationRouter(None, None, None).menu()
-    assert out['keyboard'] == []
+    # Persistent reply keyboard only: buttons send text mapped to existing
+    # commands, never callback data that ingress would have to trust.
+    assert out['keyboard'] == main_menu_keyboard()
+    assert all('callback_data' not in b and 'data' not in b for row in out['keyboard']['keyboard'] for b in row)
+    for row in out['keyboard']['keyboard']:
+        for button in row:
+            command = button_command(button['text'])
+            if command != '/spending':  # bare /spending opens the period picker in ingress
+                parse_command(command, RECEIVED, 'Asia/Kolkata')
     assert 'confirm' in out['text'].lower() and 'virtual' in out['text'].lower()
     commands = [line.strip() for line in out['text'].splitlines() if line.startswith('/')]
     assert {'/balance', '/calendar', '/spending month', '/help', '/cancel'} <= set(commands)
