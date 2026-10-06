@@ -421,6 +421,7 @@ class BudgetStore:
         for m in proposed['metadata']:
             s.add(MetadataEvent(id=new_id(), owner_id=user.id, batch_id=batch_id, value=m))
         # Preserve each ordered target action, even if the final value equals its previous value.
+        target_metadata = iter(m for m in proposed['metadata'] if m['type'] == 'set_target')
         for action in proposed['actions']:
             if action['type'] != 'set_target':
                 continue
@@ -429,6 +430,7 @@ class BudgetStore:
             if name is None:
                 fail('invalid_plan', 'The target bucket was not found.')
             account = account_by_name[name]
+            metadata = next(target_metadata)
             target = projected['buckets'][name]['target']
             # Parse canonical amount exactly without owning W1's parser.
             if action.get('remove'):
@@ -437,8 +439,10 @@ class BudgetStore:
                 from budget_bot.domain.money import parse_money
                 target = parse_money(action['amount_inr'])
             revision = (s.scalar(select(func.max(TargetVersion.revision))
-                                 .where(TargetVersion.bucket_id == account.id)) or 0) + 1
-            s.add(TargetVersion(id=new_id(), owner_id=user.id, bucket_id=account.id, batch_id=batch_id,
+                                 .where(TargetVersion.bucket_id == account.id,
+                                        TargetVersion.effective_month == local_date.replace(day=1))) or 0) + 1
+            s.add(TargetVersion(id=identifier(metadata['id']) if metadata.get('id') else new_id(),
+                                owner_id=user.id, bucket_id=account.id, batch_id=batch_id,
                                 effective_month=local_date.replace(day=1), revision=revision,
                                 target=checked_money(target) if target is not None else None))
             s.flush()
@@ -488,22 +492,28 @@ class BudgetStore:
                                                      payload=copy.deepcopy(payload), received_at=now)
                                  .on_conflict_do_nothing(index_elements=['bot_id', 'update_id'])
                                  .returning(Inbox.update_id)).scalar_one_or_none()
-            # Cursor is based on durable receipt, never handler completion. Gaps stay unacknowledged.
-            while s.get(Inbox, (str(bot_id), cursor.next_offset)) is not None:
-                cursor.next_offset += 1
+            # Telegram IDs need not be consecutive. Acknowledge durable receipt,
+            # not handler completion, and never move backwards for old/replayed IDs.
+            cursor.next_offset = max(cursor.next_offset, update_id + 1)
             return inserted is not None
 
-    def pending_updates(self, limit=100):
+    def pending_updates(self, limit=100, *, bot_id=None):
         with Session(self.engine) as s:
-            rows = s.scalars(select(Inbox).where(Inbox.completed_at.is_(None))
+            query = select(Inbox).where(Inbox.completed_at.is_(None))
+            if bot_id is not None:
+                query = query.where(Inbox.bot_id == str(bot_id))
+            rows = s.scalars(query
                              .order_by(Inbox.received_at, Inbox.update_id).limit(limit)).all()
             return [{'bot_id': row.bot_id, 'update_id': row.update_id, 'payload': copy.deepcopy(row.payload),
                      'received_at': row.received_at.isoformat()} for row in rows]
 
-    def complete_update(self, update_id, replies, now):
+    def complete_update(self, update_id, replies, now, *, bot_id=None):
         now = aware(now)
         with Session(self.engine) as s, s.begin():
-            rows = s.scalars(select(Inbox).where(Inbox.update_id == update_id).order_by(Inbox.bot_id)
+            query = select(Inbox).where(Inbox.update_id == update_id)
+            if bot_id is not None:
+                query = query.where(Inbox.bot_id == str(bot_id))
+            rows = s.scalars(query.order_by(Inbox.bot_id)
                              .with_for_update()).all()
             if len(rows) != 1:
                 fail('ambiguous_update', 'The update must identify exactly one bot inbox entry.')

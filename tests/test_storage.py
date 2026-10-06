@@ -114,6 +114,13 @@ def store(monkeypatch):
     monkeypatch.setattr('budget_bot.storage.store.plan', local_plan)
     db = BudgetStore(url, schema='test_w2')
     db.initialize()
+    from alembic import command
+    from alembic.config import Config
+    from pathlib import Path
+
+    config = Config(str(Path(__file__).resolve().parents[1] / 'alembic.ini'))
+    config.attributes.update(database_url=url, schema='test_w2')
+    command.upgrade(config, 'head')
     from budget_bot.storage.models import Base
     with db.engine.begin() as conn:
         names = ', '.join('"test_w2"."' + table.name + '"' for table in Base.metadata.sorted_tables)
@@ -224,7 +231,7 @@ def test_inbox_outbox_durability_and_fencing(store):
     assert store.save_update('bot', 40, {'update_id': 40}, NOW)
     assert not store.save_update('bot', 40, {'update_id': 40, 'different': True}, NOW)
     assert store.save_update('bot', 42, {'update_id': 42}, NOW)
-    assert store.polling_offset('bot') == 41
+    assert store.polling_offset('bot') == 43
     store.save_update('bot', 41, {'update_id': 41}, NOW)
     assert store.polling_offset('bot') == 43
     assert len(store.pending_updates()) == 3
@@ -356,7 +363,7 @@ def test_alembic_upgrade_and_durable_reopen(store):
     config.attributes.update(database_url=os.environ['BUDGET_TEST_DATABASE_URL'], schema='test_w2')
     command.upgrade(config, 'head')
     with store.engine.connect() as c:
-        assert c.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '0001_budget_storage'
+        assert c.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '0002_target_month_revision'
     owner, _ = onboard(store)
     r = store.propose(owner, [{'type': 'income', 'amount_inr': '5'}], NOW)
     store.save_update('bot', 1, {'update_id': 1}, NOW)

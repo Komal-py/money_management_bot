@@ -170,7 +170,8 @@ class TargetVersion(Base):
     __table_args__ = (
         ForeignKeyConstraint(['owner_id', 'bucket_id'], ['accounts.owner_id', 'accounts.id']),
         ForeignKeyConstraint(['owner_id', 'batch_id'], ['financial_batches.owner_id', 'financial_batches.id']),
-        UniqueConstraint('bucket_id', 'revision'), CheckConstraint('target IS NULL OR target > 0'),
+        UniqueConstraint('bucket_id', 'effective_month', 'revision', name='target_versions_month_revision_key'),
+        CheckConstraint('target IS NULL OR target > 0'),
     )
 
 
