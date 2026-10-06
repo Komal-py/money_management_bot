@@ -119,6 +119,7 @@ class State(TypedDict, total=False):
     funding_resolved: bool
     funding_source: str | None
     missing_fields: list
+    report_clarification: bool
     field_index: int
     field_name: str
 
@@ -413,6 +414,10 @@ class BudgetWorkflow:
                 question = output['clarification_question'] or 'Please clarify the missing budgeting details.'
                 return {'question': question, 'mode': 'interpret', 'actions': output['actions'],
                         'missing_fields': output['missing_fields'],
+                        # bucket_name is shared with mutations; it cannot establish report origin.
+                        'report_clarification': (bool(set(output['missing_fields']) & {'period', 'start', 'end'})
+                            and not output['actions']
+                            and set(output['missing_fields']) <= {'period', 'start', 'end', 'bucket_name'}),
                         'output': self._message(question), 'route': 'wait'}
             state = {**state, 'actions': output['actions'], 'mode': 'actions'}
         actions = copy.deepcopy(state['actions'])
@@ -545,7 +550,17 @@ class BudgetWorkflow:
             question = output['clarification_question'] or 'Please clarify the missing budgeting details.'
             return {'question': question, 'output': self._message(question), 'route': 'wait',
                     'missing_fields': output['missing_fields'], 'funding_source': source,
+                    'report_clarification': (state.get('report_clarification', False)
+                        and bool(output['missing_fields'])
+                        and set(output['missing_fields']) <= {'period', 'start', 'end', 'bucket_name'}),
                     'original': state.get('original', '') + '\nOwner answer: ' + answer}
+        if (output['kind'] == 'query' and state['mode'] == 'interpret'
+                and not state.get('edit') and not state.get('review') and not state['actions']
+                and source is None and state.get('report_clarification', False)
+                and set(state.get('missing_fields', [])) <= {'period', 'start', 'end', 'bucket_name'}):
+            return {'output': self._query(output['query'], snapshot) | {
+                'query_received_at': state['received']}, 'question': None,
+                'missing_fields': [], 'route': 'end'}
         if output['kind'] != 'mutation':
             fail('invalid_answer', 'Complete the current budgeting actions or cancel first.')
         return {'actions': output['actions'], 'mode': 'actions', 'nl': True, 'question': None,
