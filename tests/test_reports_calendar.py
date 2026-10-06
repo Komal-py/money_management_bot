@@ -5,6 +5,7 @@ import pytest
 
 from budget_bot.telegram.calendar import day_view, month_view, parse_callback
 from test_reports import StoreDouble
+from budget_bot.telegram.tables import flat, table_rows  # noqa: F401
 
 
 def buttons(view):
@@ -54,8 +55,10 @@ def test_day_active_rows_pagination_totals_and_owner_read_only():
     store.rows += [store.row('gone', '2024-03-01', 'Travel', 999, 'Undone', active=False)]
     before = deepcopy(store.rows)
     first = day_view(store, 'owner-b', '2024-03-01')
-    assert 'Total spent: ₹0.17' in first['text']
-    assert 'Travel: ₹0.17' in first['text']
+    assert 'Total spent: ₹0.17' in flat(first['text'])
+    assert 'Travel: ₹0.17' in flat(first['text'])
+    rows = table_rows(first['text'], 'Bucket')
+    assert len(rows) == 8 and all(r.startswith('Travel') and '₹0.01' in r and 'Expense-' in r for r in rows)
     assert 'Page 1 of 3' in first['text']
     assert first['text'].count('Expense-') == 8
     assert 'Expense-00' in first['text'] and 'Expense-08' not in first['text']
