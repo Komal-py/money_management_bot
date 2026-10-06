@@ -3,6 +3,7 @@ import calendar
 import re
 
 from budget_bot.services.reports import _date, _money, _summary
+from budget_bot.telegram.tables import table
 
 _MAX_PAGE = 999999
 
@@ -66,8 +67,15 @@ def day_view(store, owner_id, date, page=0):
     if page >= pages:
         raise CalendarInputError('Calendar page is out of range.')
     lines = [_summary(result), f'Page {page + 1} of {pages}']
-    for row in rows[page * 8:(page + 1) * 8]:
-        lines.append(f'{row["date"]} | {row["bucket"]} | {_money(row["amount"])} | {row["description"]}')
+    shown = rows[page * 8:(page + 1) * 8]
+    if shown:
+        # Bucket and amount align in columns; the full description sits on its
+        # own indented line so long text is never truncated on a phone.
+        cells = []
+        for row in shown:
+            cells.append([row['bucket'], _money(row['amount'])])
+            cells.append([f'  {row["description"]}', ''])
+        lines.append(table(cells, headers=['Bucket', 'Amount'], numeric={1}, wrap_first=True))
     navigation = []
     if page:
         navigation.append({'text': 'Previous', 'data': f'day:{day.isoformat()}:{page - 1}'})

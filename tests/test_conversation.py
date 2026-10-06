@@ -13,6 +13,7 @@ from budget_bot.domain.errors import BudgetError
 from budget_bot.services.reports import ReportService
 from budget_bot.storage import BudgetStore
 from budget_bot.workflows import BudgetWorkflow
+from budget_bot.telegram.tables import flat, table_rows  # noqa: F401
 
 RECEIVED = datetime(2024, 2, 29, 20, tzinfo=timezone.utc)
 NOW = RECEIVED + timedelta(days=2)
@@ -119,7 +120,7 @@ async def test_workflow_query_renders_real_reports(store, owner, report):
     out = await router(store, flow).dispatch(owner, 'Show my report', RECEIVED, NOW)
     expected = {'balances': 'Total available: ₹975.00', 'spending': 'Total spent: ₹25.00',
                 'calendar': 'March 2024'}[report]
-    assert expected in out['text'] and 'validated' not in out['text']
+    assert expected in flat(out['text']) and 'validated' not in flat(out['text'])
     assert out['query'] == query(report)
     assert store.get_snapshot(owner) == before
 
@@ -132,7 +133,7 @@ async def test_explicit_query_is_offline_and_receipt_anchored(store, owner, repo
     out = await router(store, flow).dispatch(owner, None, RECEIVED, NOW, query=query(report))
     expected = {'balances': 'Total available: ₹1000.00', 'spending': '2024-02-29 to 2024-02-29',
                 'calendar': 'February 2024'}[report]
-    assert expected in out['text']
+    assert expected in flat(out['text'])
     assert store.get_snapshot(owner) == before
 
 
@@ -159,8 +160,8 @@ async def test_workflow_query_uses_persisted_receipt_or_current_receipt_fallback
     before, pending = store.get_snapshot(owner), store.get_pending(owner)
     out = await router(store, flow).dispatch(owner, 'today', reply, NOW)
     if report == 'spending':
-        assert ('2024-02-29 to 2024-02-29' if persisted_receipt else '2024-03-01 to 2024-03-01') in out['text']
-        assert ('Total spent: ₹3.00' if persisted_receipt else 'Total spent: ₹5.00') in out['text']
+        assert ('2024-02-29 to 2024-02-29' if persisted_receipt else '2024-03-01 to 2024-03-01') in flat(out['text'])
+        assert ('Total spent: ₹3.00' if persisted_receipt else 'Total spent: ₹5.00') in flat(out['text'])
     else:
         assert out['text'] == ('February 2024' if persisted_receipt else 'March 2024')
     assert out['query'] == query(report) and 'query_received_at' not in out
@@ -168,7 +169,7 @@ async def test_workflow_query_uses_persisted_receipt_or_current_receipt_fallback
     assert store.get_snapshot(owner) == before and store.get_pending(owner) == pending
     # Explicit query dispatch uses its supplied receipt, never workflow metadata.
     explicit = await router(store, flow).dispatch(owner, None, reply, NOW, query=query(report))
-    assert ('Total spent: ₹5.00' if report == 'spending' else 'March 2024') in explicit['text']
+    assert ('Total spent: ₹5.00' if report == 'spending' else 'March 2024') in flat(explicit['text'])
     assert calls == [(owner, 'today', NOW)]
     assert store.get_snapshot(owner) == before and store.get_pending(owner) == pending
 
@@ -188,8 +189,8 @@ async def test_invalid_queries_are_safe_read_only_errors(store, owner, bad_query
     flow = BudgetWorkflow(store)
     before = store.get_snapshot(owner)
     out = await router(store, flow).dispatch(owner, None, RECEIVED, NOW, query=bad_query)
-    assert '/help' in out['text']
-    assert 'Total' not in out['text'] and 'SELECT private' not in out['text']
+    assert '/help' in flat(out['text'])
+    assert 'Total' not in flat(out['text']) and 'SELECT private' not in flat(out['text'])
     assert out['keyboard'] == [] and not out.get('query')
     assert store.get_snapshot(owner) == before and store.get_pending(owner) is None
 
@@ -203,7 +204,7 @@ async def test_range_query_canonical_bucket_and_read_only_pending_review(store, 
     before = store.get_snapshot(owner)
     requested = query(period='range', start='2024-02-29', end='2024-03-01', bucket_name='travel')
     out = await router(store, flow).dispatch(owner, None, RECEIVED, NOW, query=requested)
-    assert '2024-02-29 to 2024-03-01' in out['text'] and 'Total spent: ₹25.00' in out['text']
+    assert '2024-02-29 to 2024-03-01' in flat(out['text']) and 'Total spent: ₹25.00' in flat(out['text'])
     assert out['query']['bucket_name'] == 'Travel' and requested['bucket_name'] == 'travel'
     assert store.get_pending(owner) == pending and store.get_snapshot(owner) == before
 
@@ -212,7 +213,7 @@ async def test_range_query_canonical_bucket_and_read_only_pending_review(store, 
 async def test_naive_receipt_is_safe_error(store, owner, report):
     out = await router(store, BudgetWorkflow(store)).dispatch(
         owner, None, RECEIVED.replace(tzinfo=None), NOW, query=query(report))
-    assert '/help' in out['text'] and not out.get('query')
+    assert '/help' in flat(out['text']) and not out.get('query')
 
 
 @pytest.mark.parametrize('payload', [
@@ -243,8 +244,8 @@ async def test_invalid_calendar_buttons_are_safe(store, owner, payload):
     before = store.get_snapshot(owner)
     out = await router(store, BudgetWorkflow(store)).dispatch(
         owner, None, RECEIVED, NOW, callback_data=payload)
-    assert '/calendar' in out['text'] and out['keyboard'] == []
-    assert 'unavailable' not in out['text'] and payload not in out['text']
+    assert '/calendar' in flat(out['text']) and out['keyboard'] == []
+    assert 'unavailable' not in flat(out['text']) and payload not in flat(out['text'])
     assert store.get_snapshot(owner) == before
 
 
@@ -279,16 +280,16 @@ async def test_calendar_day_pages_current_expenses_only_for_caller_owner(store, 
     before, other_before = store.get_snapshot(owner), store.get_snapshot(other)
     route = router(store, flow)
     first = await route.dispatch(owner, None, RECEIVED, NOW, callback_data='day:2024-03-01')
-    assert 'Total spent: ₹10.00' in first['text'] and '9 expenses' in first['text']
-    assert 'Page 1 of 2' in first['text'] and first['text'].count(' | ') == 24
+    assert 'Total spent: ₹10.00' in flat(first['text']) and '9 expenses' in flat(first['text'])
+    assert 'Page 1 of 2' in flat(first['text']) and len(table_rows(first['text'], 'Bucket')) == 8
     next_button = next(b for row in first['keyboard'] for b in row if b['text'] == 'Next')
     second = await route.dispatch(owner, None, RECEIVED, NOW, callback_data=next_button['data'])
-    assert 'Page 2 of 2' in second['text'] and second['text'].count(' | ') == 3
-    combined = first['text'] + '\n' + second['text']
+    assert 'Page 2 of 2' in flat(second['text']) and len(table_rows(second['text'], 'Bucket')) == 1
+    combined = '\n'.join(table_rows(first['text'], 'Bucket') + table_rows(second['text'], 'Bucket'))
     assert 'Other owner secret' not in combined and 'Corrected ride' in combined
     assert rows[1]['description'] not in combined
     empty = await route.dispatch(owner, None, RECEIVED, NOW, callback_data='day:2024-02-29')
-    assert 'No active expenses' in empty['text'] and 'Total spent: ₹0.00' in empty['text']
+    assert 'No active expenses' in flat(empty['text']) and 'Total spent: ₹0.00' in flat(empty['text'])
     assert store.get_snapshot(owner) == before and store.get_snapshot(other) == other_before
     # Navigation did not consume the outstanding question.
     answer = await route.dispatch(owner, 'Travel', RECEIVED, RECEIVED)
@@ -300,20 +301,19 @@ def test_menu_offers_existing_commands_not_imaginary_callbacks():
     from budget_bot.telegram.commands import parse_command
     from budget_bot.telegram.menu import button_command, main_menu_keyboard
     out = ConversationRouter(None, None, None).menu()
-    # Persistent reply keyboard only: buttons send text mapped to existing
-    # commands, never callback data that ingress would have to trust.
+    # Persistent reply keyboard only: buttons send text that ingress maps to
+    # existing commands or the guided entry, never trusted callback data.
     assert out['keyboard'] == main_menu_keyboard()
     assert all('callback_data' not in b and 'data' not in b for row in out['keyboard']['keyboard'] for b in row)
     for row in out['keyboard']['keyboard']:
         for button in row:
             command = button_command(button['text'])
-            if command != '/spending':  # bare /spending opens the period picker in ingress
+            if command.startswith('/') and command != '/spending':  # bare /spending opens the period picker
                 parse_command(command, RECEIVED, 'Asia/Kolkata')
-    assert 'confirm' in out['text'].lower() and 'virtual' in out['text'].lower()
-    commands = [line.strip() for line in out['text'].splitlines() if line.startswith('/')]
-    assert {'/balance', '/calendar', '/spending month', '/help', '/cancel'} <= set(commands)
-    for command in commands:
-        parse_command(command, RECEIVED, 'Asia/Kolkata')
+    assert 'confirm' in flat(out['text']).lower() and 'virtual' in flat(out['text']).lower()
+    labels = {button['text'] for row in out['keyboard']['keyboard'] for button in row}
+    assert {'💰 Balance', '📊 Spending', '➕ Add expense', '💵 Add income', '📅 Calendar', '❓ Help'} == labels
+    assert 'type /' in flat(out['text'])
     json.dumps(out)
 
 
@@ -329,7 +329,7 @@ async def test_store_pending_review_survives_missing_graph_and_ai_disabled(store
     assert not interpreter.calls and store.get_snapshot(owner) == before
     assert store.get_pending(owner)['request_id'] == pending['request_id']
     out = await route.dispatch(owner, None, RECEIVED, RECEIVED, query=query('balances'))
-    assert 'Total available: ₹1000.00' in out['text']
+    assert 'Total available: ₹1000.00' in flat(out['text'])
 
 
 @pytest.mark.parametrize('text', [None, '', '   '])
@@ -373,13 +373,13 @@ async def test_real_sdk_outage_keeps_commands_reports_and_calendar_offline(store
             assert 'Use commands' in error.value.message
         else:
             out = await route.dispatch(owner, 'Show spending today', RECEIVED, NOW)
-            assert 'unavailable' in out['text'] and '/help' in out['text']
+            assert 'unavailable' in flat(out['text']) and '/help' in flat(out['text'])
         assert len(calls) == 1 and store.get_pending(owner) is None
         assert store.get_snapshot(owner) == before
         for command in ('/balance', '/spending today', '/calendar'):
             parsed = parse_command(command, RECEIVED, 'Asia/Kolkata')
             out = await route.dispatch(owner, None, RECEIVED, NOW, query=parsed['query'])
-            assert out['text'] and 'unavailable' not in out['text']
+            assert out['text'] and 'unavailable' not in flat(out['text'])
         day = await route.dispatch(owner, None, RECEIVED, NOW, callback_data='day:2024-03-01')
         assert 'No active expenses' in day['text'] and '/help' in route.menu()['text']
         parsed = parse_command('/expense 1 Travel Metro', RECEIVED, 'Asia/Kolkata')
@@ -447,7 +447,7 @@ async def test_real_report_periods_ignore_processing_clock(store, owner, period,
     store.confirm(owner, review['request_id'], review['revision'], RECEIVED)
     route = router(store, BudgetWorkflow(store))
     out = await route.dispatch(owner, None, RECEIVED, NOW + timedelta(days=40), query=query(period=period))
-    assert dates in out['text'] and 'Total spent: ₹25.00' in out['text']
+    assert dates in flat(out['text']) and 'Total spent: ₹25.00' in flat(out['text'])
 
 
 async def test_real_sdk_validated_query_reaches_deterministic_calendar(store, owner, monkeypatch):

@@ -28,6 +28,7 @@ from budget_bot.storage.models import Account, Batch, Outbox, Request, Transacti
 from budget_bot.telegram.calendar import day_view
 from budget_bot.telegram.transport import TelegramTransport
 from budget_bot.workflows import BudgetWorkflow, postgres_checkpointer
+from budget_bot.telegram.tables import to_html
 
 NOW = datetime(2026, 10, 6, 10, tzinfo=timezone.utc)
 pytestmark = pytest.mark.postgres
@@ -926,7 +927,8 @@ async def test_transport_reply_order_claim_limit_backoff_and_fencing(store, acto
         assert rows[0]['delivered_at'] is None
         assert all(row['delivered_at'] is not None for row in rows[1:20])
         assert await transport.deliver_once(NOW) == 5
-        assert [p['text'] for name, p in wire.calls if name == 'sendMessage'] == [r['text'] for r in replies]
+        assert [p['text'] for name, p in wire.calls if name == 'sendMessage'] == [to_html(r['text']) for r in replies]
+        assert all(p.get('parse_mode') == 'HTML' for name, p in wire.calls if name == 'sendMessage')
         later = NOW + timedelta(seconds=3)
         lease = store.pending_outbox(later, bot_id=bot.id)
         assert len(lease) == 1 and lease[0]['text'] == replies[0]['text']

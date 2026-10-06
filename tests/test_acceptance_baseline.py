@@ -13,6 +13,7 @@ from budget_bot.storage import BudgetStore
 from budget_bot.storage.models import Posting, TransactionRevision
 from budget_bot.telegram.calendar import day_view
 from budget_bot.telegram.transport import TelegramTransport
+from budget_bot.telegram.tables import flat, table_rows
 
 NOW = datetime(2026, 10, 6, 10, tzinfo=timezone.utc)
 
@@ -152,7 +153,7 @@ def test_correct_undo_reports_calendar_and_preserved_audit(store, owner):
                            'changes': {'amount_inr': '7', 'date_expression': '2026-10-05'}}])
     assert store.spending(owner, NOW.date(), NOW.date())['count'] == 0
     assert store.spending(owner, date(2026, 10, 5), date(2026, 10, 5))['total'] == 700
-    assert '₹7.00 | Metro' in day_view(store, owner, '2026-10-05')['text']
+    assert any(r.split(maxsplit=2)[1:] == ['₹7.00', 'Metro'] for r in table_rows(day_view(store, owner, '2026-10-05')['text'], 'Bucket'))
     commit(store, owner, [{'type': 'undo', 'transaction_id': transaction['id']}])
     assert store.spending(owner, date(2026, 10, 1), date(2026, 10, 31))['count'] == 0
     with store.engine.connect() as connection:
@@ -185,7 +186,7 @@ async def test_actual_controller_report_identity_and_private_ingress(store, owne
     telegram_id = _telegram_id(store, owner)
     payload = {'message': {'from': {'id': telegram_id, 'is_bot': False},
                           'chat': {'id': telegram_id, 'type': 'private'}, 'text': '/balance'}}
-    assert 'Unallocated pool: ₹50.00' in (await controller.handle(payload, NOW))[0]['text']
+    assert 'Unallocated pool: ₹50.00' in flat((await controller.handle(payload, NOW))[0]['text'])
     payload['message']['chat']['type'] = 'group'
     assert await controller.handle(payload, NOW) == []
 

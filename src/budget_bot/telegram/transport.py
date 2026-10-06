@@ -11,8 +11,11 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.error import TelegramError
 from telegram.request import HTTPXRequest
+
+from budget_bot.telegram.tables import to_html
 
 logger = logging.getLogger(__name__)
 CALLBACK_ACK_TIMEOUT = 2.0
@@ -201,7 +204,7 @@ class TelegramTransport:
                 chunks = list(_text_chunks(item['text']))
                 for index, text in enumerate(chunks):
                     await self.bot.send_message(
-                        chat_id=item['chat_id'], text=text,
+                        chat_id=item['chat_id'], text=to_html(text), parse_mode=ParseMode.HTML,
                         reply_markup=_keyboard(item.get('keyboard')) if index == len(chunks) - 1 else None,
                     )
             except Exception:
