@@ -1,17 +1,27 @@
 """Private-chat ingress: trusted Telegram identity before any budget operation."""
+from datetime import datetime, timezone
+from uuid import UUID
 
 
 class BudgetController:
-    def __init__(self, store, workflow, onboarding, reports, access):
+    def __init__(self, store, workflow, onboarding, reports, access, command_parser=None):
         self.store = store
         self.workflow = workflow
         self.onboarding = onboarding
         self.reports = reports
         self.access = access
+        self.command_parser = command_parser
+
+    @staticmethod
+    def _reply(chat_id, output):
+        if isinstance(output, str):
+            output = {'text': output}
+        return [{'chat_id': chat_id, 'text': output['text'], 'keyboard': output.get('keyboard', [])}]
 
     async def handle(self, payload, now):
-        message = payload.get('message') or (payload.get('callback_query') or {}).get('message')
-        sender = (payload.get('callback_query') or {}).get('from') or (message or {}).get('from')
+        callback = payload.get('callback_query') or {}
+        message = payload.get('message') or callback.get('message')
+        sender = callback.get('from') or (message or {}).get('from')
         if not message or not sender:
             return []
         chat = message.get('chat') or {}
@@ -20,7 +30,25 @@ class BudgetController:
         telegram_id = sender['id']
         user = self.store.get_user(telegram_id)
         if not user or not user.get('active'):
-            return [{'chat_id': chat['id'], 'text': 'This bot is invite-only. Ask the administrator for an invite.',
-                     'keyboard': []}]
-        return [{'chat_id': chat['id'], 'text': 'Budget access verified. Financial features are being integrated.',
-                 'keyboard': []}]
+            return self._reply(chat['id'], 'This bot is invite-only. Ask the administrator for an invite.')
+        owner = user['owner_id']
+        if callback:
+            data = callback.get('data', '')
+            if data.startswith('rev:'):
+                try:
+                    _, request, revision, decision = data.split(':')
+                    UUID(request)
+                    revision = int(revision)
+                    if revision < 1 or decision not in {'confirm', 'edit', 'cancel'}:
+                        raise ValueError
+                except (ValueError, TypeError):
+                    return self._reply(chat['id'], 'That review button is invalid. Open your current review.')
+                return self._reply(chat['id'], await self.workflow.decide(owner, request, revision, decision, now))
+            return self._reply(chat['id'], 'That button is not available. Use /help.')
+        text = message.get('text', '')
+        received = datetime.fromtimestamp(message.get('date', int(now.timestamp())), timezone.utc)
+        if text.startswith('/') and self.command_parser:
+            command = self.command_parser(text, received, user['timezone'])
+            if command['kind'] == 'mutation':
+                return self._reply(chat['id'], await self.workflow.submit(owner, command['actions'], received))
+        return self._reply(chat['id'], 'Use /help for commands. All money changes require review and confirmation.')

@@ -47,3 +47,52 @@ async def test_uninvited_user_gets_no_financial_access():
     controller = BudgetController(store, None, None, None, None)
     replies = await controller.handle(message(sender=2, chat=2), NOW)
     assert 'invite' in replies[0]['text'].lower()
+
+
+class Workflow:
+    def __init__(self):
+        self.calls = []
+
+    async def submit(self, owner, actions, received):
+        self.calls.append(('submit', owner, actions))
+        return {'text': 'Review required', 'keyboard': []}
+
+    async def decide(self, owner, request, revision, decision, now):
+        self.calls.append(('decide', owner, request, revision, decision))
+        return {'text': 'Saved once', 'keyboard': []}
+
+
+@pytest.mark.asyncio
+async def test_financial_command_only_submits_review():
+    from budget_bot.controller import BudgetController
+    workflow = Workflow()
+    parse = lambda *_: {'kind': 'mutation', 'actions': [{'type': 'income', 'amount_inr': '100'}]}
+    controller = BudgetController(Store(), workflow, None, None, None, command_parser=parse)
+    replies = await controller.handle(message(text='/income 100 Salary'), NOW)
+    assert replies[0]['text'] == 'Review required'
+    assert workflow.calls == [('submit', 'owner-1', [{'type': 'income', 'amount_inr': '100'}])]
+
+
+@pytest.mark.asyncio
+async def test_confirmation_callback_bound_to_actor_and_revision():
+    from budget_bot.controller import BudgetController
+    workflow = Workflow()
+    controller = BudgetController(Store(), workflow, None, None, None)
+    request = '11111111-1111-4111-8111-111111111111'
+    callback = {'update_id': 2, 'callback_query': {'id': 'c1', 'from': {'id': 1, 'is_bot': False},
+                'message': {'chat': {'id': 1, 'type': 'private'}},
+                'data': f'rev:{request}:2:confirm'}}
+    replies = await controller.handle(callback, NOW)
+    assert replies[0]['text'] == 'Saved once'
+    assert workflow.calls == [('decide', 'owner-1', request, 2, 'confirm')]
+
+
+@pytest.mark.asyncio
+async def test_malformed_confirmation_is_not_executed():
+    from budget_bot.controller import BudgetController
+    workflow = Workflow()
+    controller = BudgetController(Store(), workflow, None, None, None)
+    callback = {'callback_query': {'from': {'id': 1, 'is_bot': False},
+                'message': {'chat': {'id': 1, 'type': 'private'}}, 'data': 'rev:not-an-id:2:confirm'}}
+    await controller.handle(callback, NOW)
+    assert workflow.calls == []
