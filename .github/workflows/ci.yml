@@ -92,7 +92,8 @@ jobs:
         run: >-
           uv run --no-sync pytest -p pytest_asyncio.plugin
           tests/test_conversation.py tests/test_conversation_dependency_errors.py
-          tests/test_reports.py tests/test_reports_calendar.py tests/test_reports_integration.py -q
+          tests/test_reports.py tests/test_reports_calendar.py tests/test_reports_integration.py
+          tests/test_tables.py -q
       - name: Remaining financial core and controller tests (test_w2)
         env:
           BUDGET_TEST_SCHEMA: test_w2
