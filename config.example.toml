@@ -1,0 +1,20 @@
+# Non-secret defaults; runtime credentials live only in ignored .env.
+[budget]
+currency = "INR"
+timezone = "Asia/Kolkata"
+pending_minutes = 30
+max_actions = 8
+week_start = "Monday"
+
+[database]
+app_schema = "budget"
+workflow_schema = "workflow"
+
+[telegram]
+mode = "long_polling"
+private_chats_only = true
+
+[ai]
+reasoning_effort = "low"
+timeout_seconds = 30
+automatic_retries = 0
