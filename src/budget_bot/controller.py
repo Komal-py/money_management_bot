@@ -1,7 +1,9 @@
 """Private-chat ingress: trusted Telegram identity before any budget operation."""
 from datetime import datetime, timezone
+import hashlib
+import json
 import re
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from budget_bot.domain.errors import BudgetError
 
@@ -96,11 +98,24 @@ class BudgetController:
                     return self._reply(chat_id, error.message)
             return self._reply(chat['id'], 'This bot is invite-only. Ask the administrator for an invite.')
         try:
-            return self._reply(chat_id, await self._dispatch(user, message, callback, now))
+            return self._reply(chat_id, await self._dispatch(user, message, callback, now,
+                                                             operation=self._operation(payload, user)))
         except BudgetError as error:
             return self._reply(chat_id, error.message)
 
-    async def _dispatch(self, user, message, callback, now):
+    @staticmethod
+    def _operation(payload, user):
+        """Stable per-owner identity of one Telegram update, reused on inbox retry."""
+        update_id = payload.get('update_id')
+        if type(update_id) is not int:
+            return None
+        # A durable inbox retry replays the byte-identical payload; include it so
+        # identity never merges two distinct updates that reuse an id.
+        body = json.dumps(payload, sort_keys=True, separators=(',', ':'), default=str)
+        digest = hashlib.sha256(body.encode()).hexdigest()
+        return str(uuid5(NAMESPACE_URL, f'budget-bot:update:{user["owner_id"]}:{update_id}:{digest}'))
+
+    async def _dispatch(self, user, message, callback, now, operation=None):
         from budget_bot.telegram.commands import CommandError, HELP_TEXT
 
         owner = user['owner_id']
@@ -185,9 +200,9 @@ class BudgetController:
             if self.onboarding is not None and not user.get('onboarded'):
                 return self._setup_output(self.onboarding.handle(owner, '/start', now))
             if command['kind'] == 'mutation':
-                return await self.workflow.submit(owner, command['actions'], received)
+                return await self.workflow.submit(owner, command['actions'], received, request_id=operation)
             if command['kind'] == 'query':
                 return await self._conversation().dispatch(owner, text, received, now, query=command['query'])
         if self.onboarding is not None and not user.get('onboarded'):
-            return self._setup_output(self.onboarding.handle(owner, text, now))
+            return self._setup_output(self.onboarding.handle(owner, text, now, operation=operation))
         return await self._conversation().dispatch(owner, text, received, now)

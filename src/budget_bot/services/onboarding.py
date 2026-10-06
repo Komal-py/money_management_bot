@@ -149,7 +149,13 @@ class OnboardingService:
         elif state['step'] == 'name':
             state['step'] = 'more' if state['buckets'] else 'opening'
 
-    def handle(self, owner_id, text, now, *, expected_request=None):
+    @staticmethod
+    def _mark(state, operation):
+        if operation is not None:
+            state['last_operation'] = operation
+        return state
+
+    def handle(self, owner_id, text, now, *, expected_request=None, operation=None):
         """Handle text, optionally fencing a button to its draft under the setup lock."""
         self._now(now)
         with self.store.engine.begin() as connection:
@@ -162,17 +168,20 @@ class OnboardingService:
                 raise BudgetError('stale_setup', 'That setup button is no longer current. Use /start for setup.')
             if snapshot['onboarded']:
                 return self._response('Setup is complete. Open balances or the calendar.', done=True)
+            if operation is not None and state is not None and state.get('last_operation') == operation:
+                # Inbox retry of an already applied answer: replay the resulting prompt only.
+                return self._prompt(state)
             if state is None:
                 state = self._new_state()
                 if text in ('setup:cancel', '/cancel', 'Cancel', 'cancel'):
                     state['step'] = 'cancelled'
                 connection.execute(insert(self.states).values(
-                    owner_id=owner_id, state=state, updated_at=now))
+                    owner_id=owner_id, state=self._mark(state, operation), updated_at=now))
                 return self._prompt(state)
             if 'request_id' not in state:
                 state.setdefault('buckets', [])
                 state['request_id'] = str(uuid4())
-                self._save(connection, owner_id, state, now)
+                self._save(connection, owner_id, self._mark(state, operation), now)
             # Recover a store proposal whose commit outlived the draft write.
             if state['step'] == 'more':
                 pending = self.store.get_pending(owner_id)
@@ -186,12 +195,12 @@ class OnboardingService:
                 state = self._new_state()
                 if command in ('setup:cancel', '/cancel', 'cancel'):
                     state['step'] = 'cancelled'
-                self._save(connection, owner_id, state, now)
+                self._save(connection, owner_id, self._mark(state, operation), now)
                 return self._prompt(state)
             if state['step'] == 'cancelled':
                 if command == '/start':
                     state = self._new_state()
-                    self._save(connection, owner_id, state, now)
+                    self._save(connection, owner_id, self._mark(state, operation), now)
                 return self._prompt(state)
             if command in ('setup:back', '/back', 'back'):
                 if state['step'] == 'review':
@@ -201,11 +210,11 @@ class OnboardingService:
                     state['step'] = 'more'
                 else:
                     self._back(state)
-                self._save(connection, owner_id, state, now)
+                self._save(connection, owner_id, self._mark(state, operation), now)
                 return self._prompt(state)
             if state['step'] == 'review':
                 result = self._review(owner_id, state, now)
-                self._save(connection, owner_id, state, now)
+                self._save(connection, owner_id, self._mark(state, operation), now)
                 return result
             if text == '/start':
                 return self._prompt(state)
@@ -236,11 +245,11 @@ class OnboardingService:
                 state['step'] = 'more'
             elif text in ('setup:finish', 'review'):
                 result = self._review(owner_id, state, now)
-                self._save(connection, owner_id, state, now)
+                self._save(connection, owner_id, self._mark(state, operation), now)
                 return result
             elif text in ('setup:more', 'more'):
                 if len(self._actions(state)) >= 8:
                     raise BudgetError('invalid_actions', 'Setup allows eight actions. Review now; add buckets later.')
                 state['step'] = 'name'
-            self._save(connection, owner_id, state, now)
+            self._save(connection, owner_id, self._mark(state, operation), now)
             return self._prompt(state)

@@ -221,7 +221,7 @@ async def test_durable_transport_retries_real_inbox_without_network(store):
     assert await transport.poll_once(NOW) == 1
     assert await transport.deliver_once(NOW) == 1
     assert bot.sent['text'] == 'Durable reply'
-    assert store.pending_outbox(NOW) == []
+    assert store.pending_outbox(NOW, bot_id=bot_id) == []
 
 
 @pytest.mark.asyncio

@@ -53,7 +53,7 @@ class Workflow:
     def __init__(self):
         self.calls = []
 
-    async def submit(self, owner, actions, received):
+    async def submit(self, owner, actions, received, request_id=None):
         self.calls.append(('submit', owner, actions))
         return {'text': 'Review required', 'keyboard': []}
 
