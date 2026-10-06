@@ -1,6 +1,6 @@
 # Telegram budget bot
 
-**Current stage: all eight worker contributions integrated and coordinator-tested; startup/controller assembly still unfinished. The bot is not running and this project is not ready for release.**
+**Current stage: original eight worker contributions integrated; executable startup has now been implemented and coordinator-tested after the remaining-work agent quota failures. Controller/onboarding/NL/calendar assembly and release acceptance remain unfinished. The bot is not running and this project is not ready for release.**
 
 Invite-only, multi-user virtual INR budgeting through Telegram, with isolated owners, central pool and buckets, reviewed financial actions, audited corrections, targets, spending reports, and a recorded-expense calendar.
 
@@ -10,7 +10,7 @@ Invite-only, multi-user virtual INR budgeting through Telegram, with isolated ow
 - Real PostgreSQL planning/storage, guided setup/access and durable LangGraph workflows tested. Cross-worker seam tests use the real OpenAI Responses SDK with controlled HTTP, not live AI or owner financial data.
 - Financial changes remain proposals until explicit Confirm; undo/correction requires explicit owner-scoped record selection. Funding clarification accepts an explicit pool/income choice instead of looping.
 - Source/test Ruff and Git whitespace checks passed. Local CI configuration enumerates all current test files in the required isolated schemas; remote CI has not run.
-- Wheel/source distribution build succeeds and private/worktree paths are excluded. **The declared console entry point still targets missing `budget_bot.main`, so build success is not runnable startup.**
+- Historical wheel/source distribution builds excluded private/worktree paths. **`budget_bot.main` now exists; startup/configuration passed 22 coordinator tests against real test PostgreSQL and controlled Telegram SDK.** Final assembly still needs a fresh exhaustive test/build/package run.
 
 See [Implementation status](docs/IMPLEMENTATION_STATUS.md) for evidence, review limits and remaining work.
 
@@ -26,7 +26,7 @@ uv build
 
 Schema-specific test commands are in [.github/workflows/ci.yml](.github/workflows/ci.yml). Do not run the whole suite under one shared schema: individual fixtures enforce different isolated schemas. The local coordinator's ignored `.private/verify_wave.py` verifies coverage, JUnit counts and frozen-source fingerprints.
 
-No startup command is offered until the actual entry point and ingress routes have been implemented and exercised.
+Offline configuration validation is available with `python -m budget_bot --check-config`. Explicit migration and live startup must wait for completed ingress acceptance; the current component checks do not authorize or establish a running bot.
 
 ## Requirements and design
 
@@ -42,4 +42,4 @@ No startup command is offered until the actual entry point and ingress routes ha
 
 Implementation, eight concurrently isolated workers, existing PostgreSQL project/test resources, bounded synthetic provider checks and eventual publication to `https://github.com/Komal-py/money_management_bot.git` on `main` are approved. Credential/preflight/pairing setup completed; credentials stay ignored, and source Hermes configuration is unchanged.
 
-Remaining: startup and controller assembly, calendar routing, complete application acceptance, release/security checks, real bounded synthetic startup smoke, then repository publication/readback and remote CI. **No GitHub push or live application deployment has occurred.** Laptop long polling needs the laptop awake and online; always-on hosting is a separate decision. The temporary three-hour wake-lock expired without changing the sleep plan. Provider tariffs remain unverified.
+Remaining: complete controller/NL/calendar assembly, complete application acceptance, release/security checks, final build/entrypoint verification, real bounded synthetic startup smoke, then repository publication/readback and remote CI. **No GitHub push or live application deployment has occurred.** Laptop long polling needs the laptop awake and online; always-on hosting is a separate decision. The temporary three-hour wake-lock expired without changing the sleep plan. Provider tariffs remain unverified.

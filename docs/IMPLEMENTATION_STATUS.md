@@ -30,11 +30,17 @@ Full source/test Ruff and Git whitespace checks passed. Local CI YAML was update
 
 ## Packaging evidence and limitation
 
-`uv build --out-dir .coordination/dist` produced a wheel and source distribution. Archive inspection initially caught nested worker example files in the source distribution. A root-anchored source allowlist/exclusions removed them; final archive inspection found **no .env/private/coordination/worktree paths**, and every wheel Python file matches current source bytes. Build success does **not** make this a runnable product: `budget_bot/main.py` is still absent while the console script points to it. No package is delivered or published as runnable.
+`uv build --out-dir .coordination/dist` produced a wheel and source distribution. Archive inspection initially caught nested worker example files in the source distribution. A root-anchored source allowlist/exclusions removed them; final archive inspection found **no .env/private/coordination/worktree paths**, and every wheel Python file matches current source bytes. Build success does **not** make this a released product. The entrypoint limitation in this historical build was repaired in the R1 coordinator recovery below; a new final build and complete assembly verification remain required.
+
+## Remaining-worker failure and startup recovery
+
+All five new R1–R5 agents failed with exit 1 on `gpt-6.1-sol` token-rate limits; all original logs/status files and partial worktree files are preserved. None completed its assignment. The coordinator inspected R1's saved tests, reproduced failures and implemented startup/configuration. Main commit `c70de3a` contains the recovered code and `docs/R1_EVIDENCE.md`. Independent main readback: **22 targeted startup/settings tests passed** using approved test_w1 PostgreSQL and controlled real Telegram SDK; full source/test Ruff and whitespace checks passed. This selected result is not additive to the historical complete regression and does not prove assembled application acceptance.
+
+R2's partial ingress tests were inspected and executed: **8 failed, 7 passed**, exposing unfinished invite/revocation/actor/callback checks. R3/R4/R5 have incomplete preserved conversation/acceptance/release files, not accepted deliverables. No live agent remains from the first R wave.
 
 ## Remaining release work
 
-Wire executable startup, onboarding/access controller paths, AI/graph presentation and query routing; fix `/calendar` dispatch; exercise complete application acceptance; run release security/dependency gates and actual startup/live synthetic smoke; then publish/read back the approved repository and verify remote CI. The bot application is **not running** and **no GitHub push has occurred**.
+Complete onboarding/access controller paths, AI/graph presentation and query routing; fix `/calendar` dispatch; exercise complete application acceptance; run release security/dependency gates and a fresh final package/build check plus actual startup/live synthetic smoke; then publish/read back the approved repository and verify remote CI. The bot application is **not running** and **no GitHub push has occurred**.
 
 ## Authorization/resource boundaries
 
