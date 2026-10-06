@@ -6,6 +6,8 @@ outbox lease expiry/backoff; each claimed item is attempted once per cycle.
 """
 import asyncio
 import logging
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
@@ -14,6 +16,40 @@ from telegram.request import HTTPXRequest
 
 logger = logging.getLogger(__name__)
 CALLBACK_ACK_TIMEOUT = 2.0
+_SDK_LOG_LOCK = threading.Lock()
+_SDK_LOG_USERS = 0
+
+
+class _PrivateSDKLogs(logging.Filter):
+    """Remove SDK payload/exception content before any log handler sees it."""
+    def filter(self, record):
+        record.msg = 'Telegram SDK event (details withheld)'
+        record.args = ()
+        record.exc_info = None
+        record.exc_text = None
+        record.stack_info = None
+        return True
+
+
+_SDK_LOG_FILTER = _PrivateSDKLogs()
+
+
+@contextmanager
+def _private_sdk_logging():
+    """Scope privacy to polling; overlapping calls share one removable filter."""
+    global _SDK_LOG_USERS
+    sdk_logger = logging.getLogger('telegram.Bot')
+    with _SDK_LOG_LOCK:
+        if _SDK_LOG_USERS == 0:
+            sdk_logger.addFilter(_SDK_LOG_FILTER)
+        _SDK_LOG_USERS += 1
+    try:
+        yield
+    finally:
+        with _SDK_LOG_LOCK:
+            _SDK_LOG_USERS -= 1
+            if _SDK_LOG_USERS == 0:
+                sdk_logger.removeFilter(_SDK_LOG_FILTER)
 
 
 def _text_chunks(text):
@@ -80,10 +116,11 @@ class TelegramTransport:
         """
         offset = self.store.polling_offset(self.bot.id)
         try:
-            updates = await self.bot.get_updates(
-                offset=offset, limit=100, timeout=0,
-                allowed_updates=['message', 'callback_query'],
-            )
+            with _private_sdk_logging():
+                updates = await self.bot.get_updates(
+                    offset=offset, limit=100, timeout=0,
+                    allowed_updates=['message', 'callback_query'],
+                )
         except TelegramError:
             logger.warning('Telegram receive failed; durable inbox retained')
             updates = []
