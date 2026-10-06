@@ -225,7 +225,6 @@ async def test_durable_transport_retries_real_inbox_without_network(store):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason='Frozen baseline controller.py:63-71 does not dispatch calendar')
 async def test_calendar_command_is_wired_to_real_view(store, owner):
     setup(store, owner)
     controller = BudgetController(store, None, None, ReportService(store), None)

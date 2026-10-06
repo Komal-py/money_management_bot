@@ -28,7 +28,34 @@
     "failure": "Replaying an old generated setup Cancel callback removed the newer pending review.",
     "evidence": ".coordination/r2-setup-replay-red.xml"
   },
-  "integration_status": "held pending repair and fresh review",
+  "repair_round_one": {
+    "delegation": "deleg_c55a257c",
+    "coordinator_tests": {"passed": 71, "evidence": ".coordination/r2-fix-coordinator-green.xml"},
+    "followup_review_passed": false,
+    "followup_finding": "Non-onboarded cal:/day: callbacks create/restart setup via unbound /start fallback.",
+    "followup_evidence": ".coordination/r2-fix-independent-review.log",
+    "coordinator_fallback_reproduction": {"failed": 8, "evidence": ".coordination/r2-calendar-fallback-red.xml"}
+  },
+  "coordinator_followup_repair": {
+    "change": "Non-onboarded calendar callbacks reply without entering onboarding; backend restart test preserves visible prompt while requiring new fenced callback UUIDs.",
+    "controller_passed": 79,
+    "onboarding_passed": 49,
+    "evidence": [".coordination/r2-final-coordinator-green.xml", ".coordination/r2-final-onboarding-green.xml"],
+    "review_status": "passed fresh bounded review; see .coordination/r2-final-independent-review.log"
+  },
+  "integration": {
+    "worker_repair_commit": "7b3a6f0",
+    "main_commits": ["4de968b", "c799df0"],
+    "main_controller_tests": {"passed": 84, "failed": 0, "evidence": ".coordination/r2-main-corrected-green.xml"},
+    "main_onboarding_tests": {"passed": 49, "failed": 0, "evidence": ".coordination/r2-main-onboarding-green.xml"},
+    "main_baseline_acceptance": {"passed": 10, "failed": 0, "skipped": 0, "evidence": ".coordination/r2-baseline-calendar-green.xml"},
+    "actual_controller_router_graph_sdk_seams": {"passed": 21, "failed": 0, "evidence": ".coordination/r2-r3-controller-final.xml"},
+    "runtime_settings_regression": {"passed": 22, "failed": 0, "evidence": ".coordination/r2-r3-runtime-green.xml"},
+    "resolved_test_drift": "Two legacy report doubles now provide complete frozen query and snapshot contracts while asserting trusted owner and no workflow writes; obsolete calendar strict xfail removed only after actual XPASS. New integration fixture uses zero-based calendar page and actual empty-report text.",
+    "count_limits": "Selected suites overlap previous runs; not a new exhaustive-main total.",
+    "full_source_test_ruff_and_whitespace": "passed"
+  },
+  "integration_status": "integrated and selected main assembly seams verified; independent R4 acceptance and R5 release remain pending",
   "repair_delegation": "deleg_c55a257c",
   "release_signoff": false,
   "live_telegram_or_ai_test": false
