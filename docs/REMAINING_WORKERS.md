@@ -1,0 +1,43 @@
+# Five remaining-work agents
+
+This wave is authorized by the owner's request to divide remaining work among five separate subagents. The original W1–W8 wave is finished and retained unchanged. These five new independently launched Hermes agents use **gpt-6.1-sol / azure-kiro-sol61**, low/medium reasoning, disjoint Git worktrees and **1800-second per-run budgets**. Tariffs are unverified. Source Hermes configuration remains unchanged.
+
+Baseline: main `742a30c`, 435 passed and one strict calendar-routing expected failure. Baseline is component integration, not runnable product. All work is inside the existing project. No new database/server/container, no live owner money, no live bot/provider calls by workers, no worker pushes. Existing approved test database and schemas are reused.
+
+## Ownership and deliverables
+
+| Agent | Owned files | Deliverable | Model effort | Existing test schema |
+|---|---|---|---|---|
+| R1 startup/config | src/budget_bot/main.py, __main__.py, settings.py; tests/test_runtime*.py, test_settings.py | Executable composition, explicit migration entry, AI-disabled startup, graceful lifecycle, offline config check and controlled startup tests | Medium | test_w1 |
+| R2 ingress/access | src/budget_bot/controller.py; tests/test_controller*.py | Trusted private actor checks, invitation redemption, admin/setup/timezone/cancel routing, confirmations and safe user errors | Medium | test_w2 |
+| R3 conversation/reports | src/budget_bot/services/conversation.py; tests/test_conversation*.py | NL/current-question dispatch, validated report dispatch, calendar month/day callbacks and menu presentation | Medium | test_w7 |
+| R4 independent QA | tests/test_acceptance_release.py; docs/R4_REVIEW.md | Real service/graph/store acceptance scenarios, negative ownership/replay/outage cases and concrete read-only security review | Medium | test_w8 |
+| R5 release preparation | scripts/verify_release.py; .github/workflows/ci.yml; README.md, docs/RUNBOOK.md, docs/R5_RELEASE.md | Exhaustive schema-aware test/build/package checks, dependency audit recipe and release/start-stop instructions | Low | test_w5 |
+
+Each agent also owns `docs/R<n>_EVIDENCE.md`. No other file may be changed. Parent owns shared contracts, pyproject/uv.lock/conftest, merged fixes and final regression, production migrations/live service lifecycle, synthetic smoke tests, exact release review, GitHub push/readback and remote CI. Parent is accountable for finishing; workers prepare code/evidence, not pretending to deploy. New changes to financial semantics require approval, not worker inference.
+
+## Frozen new integration contract
+
+R3 provides `ConversationRouter(store, workflow, reports)` in `budget_bot.services.conversation`:
+
+```python
+async def dispatch(self, owner_id, text, received_at, now, *, query=None, callback_data=None) -> dict | None:
+    ...
+
+def menu(self) -> dict:
+    ...
+```
+
+Outputs are existing JSON-safe `{text, keyboard, review?, result?, query?}` dictionaries; keyboard uses `{text,data}`. Sender/chat authorization belongs R2, not to model input. Query keys retain docs/CONTRACTS.md. Only `cal:`/`day:` calendar callbacks are handled here. Calendar dates/current month use the owner's timezone and approved receipt. Day pages read only current owner's active expenses. Invalid calendar/report arguments produce safe errors, never SQL/provider/credential leakage. Incoming natural-language text first attempts `workflow.answer(owner_id,text,now)`; **only BudgetError code no_question** permits starting a new `workflow.natural_language(owner_id,text,received_at)`. If workflow returns `query`, use deterministic reports/calendar rendering rather than merely 'query validated'. Pending-review errors are not bypassed. No-query callback dispatch may return None for unsupported callback; no financial write is performed by menu/query/calendar. Offline commands/reports/menu remain usable without an interpreter.
+
+R2 retains existing `BudgetController(store,workflow,onboarding,reports,access,command_parser=None)` and adds **optional keyword-only `conversation=None`**. If omitted, lazily construct R3 ConversationRouter. Existing constructor calls remain compatible. Workers may inject a narrowly scoped test double at this seam while sibling implementation is unavailable; no production stub or copied sibling implementation. Controller handles private actor validation before any access. Unknown users can only redeem a strictly parsed `/start <invite>` using trusted Telegram ID; revoked users do not silently regain access. After successful redemption, initialize/resume guided onboarding. `/start` for a registered owner displays setup or menu. Setup answers/buttons take precedence over new NL queries. Onboarding returned reviews use deterministic financial review rendering plus the same `rev:<request_uuid>:<revision>:confirm|edit|cancel` buttons; Confirm through workflow.decide only. Setup Edit routes to onboarding editing after validating owner/request/revision; stale callbacks never edit a newer review. Review cancellation does not enter owner money. Admin APIs show only access metadata. Invalid user input becomes a safe reply; unexpected DB/transport failures stay retryable and are not swallowed as success.
+
+R1 composes existing BudgetStore, OnboardingService, AccessService, ReportService, BudgetWorkflow (PostgreSQL checkpointer), AIInterpreter when enabled, R2 BudgetController, and TelegramTransport. Existing signature plus optional conversation seam needs no R1 dependency on unpublished R3. Bind W5 deterministic review/result rendering to the workflow. Do not initialize app tables automatically instead of real migrations. Explicit migration operation targets configured approved schemas; checkpoint/onboarding initialization is scoped/idempotent. Verify webhook state without deleting or dropping queued updates. Config-check must be offline/redacted, and an AI-disabled path cannot require provider credentials. Importing main must not load owner .env, contact services or mutate state. Workers only run lifecycle with controlled Telegram/AI boundaries and approved test DB; parent starts production after verification.
+
+R4 may write failing acceptance tests for missing sibling wiring and clearly document that state; do not replace missing production components with passing fake releases, skip required cases, or annotate new known gaps as green acceptance. Existing strict xfail removal belongs coordinator after calendar routing is integrated. Keep tests test_w8-only, unique synthetic identities, real PostgreSQL/graph/services and controlled real Telegram/AI SDK adapters. Review baseline exact source; final merged sign-off remains parent's responsibility.
+
+R5's verification runner must enumerate all `tests/test_*.py` exactly once, partition schema allowlists (test_domain -> w2, runtime -> w1, controller/storage/settings -> w2, onboarding -> w3, AI -> w5, workflow -> w6, conversation/reports -> w7, Telegram -> w4, acceptance -> w8, integration_store -> test_integration), use only explicitly passed test env, hash source/config before/after and parse JUnit declared/enumerated totals. Never default to production DATABASE_URL or read .env. Unknown files should fail accounting rather than vanish. CLI arguments allow explicit source root/report directory; no Windows-only interpreter path. Runner runs sequential schema suites and builds in isolated output, inspects both archives for private paths/credential leakage and matches wheel source/entrypoint. Dependency audit must use environment packages/manifests without sending .env or financial text; report real network blocks honestly. CI uses disposable provider-free PostgreSQL only as previously authorized; no real secrets. Docs distinguish instructions from observed execution.
+
+## Concurrent execution and completion
+
+Five agents start together from this frozen contract, not from each other's moving source. Run targeted suites only using the shared installed project interpreter plus worktree PYTHONPATH. Test credentials passed in process env only; no copying .env into a worktree, logging URL or argv secrets. No full-suite or live poller in a worker. Use strict test-first changes and record real RED/GREEN commands. Commit only owned files; return exact commit SHA, test outcomes, unresolved errors and new interfaces. Child process exit 0 is not coordinator acceptance. Parent verifies all five launcher/agent process trees at startup, later inspects each returned commit and test evidence, merges, then exercises actual cross-worker application paths before release claims.
