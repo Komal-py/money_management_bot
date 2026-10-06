@@ -1,13 +1,13 @@
-"""Independent release gates: real test_w8 state, no live Telegram/provider calls.
+"""Independent application gates and strict defect repros, not live/release sign-off.
 
-Ingress tests deliberately fail on missing frozen-contract wiring; no xfails/skips.
-Service tests separately establish component evidence, not runnable release status.
+Real test_w8 PostgreSQL, controller/services/router/graph and controlled SDK wire.
+Original incomplete quota-attempt suite is preserved in commit 9fe6a86.
 """
 import importlib
 import json
 import os
 from datetime import date, datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -24,7 +24,7 @@ from budget_bot.services.access import AccessService
 from budget_bot.services.onboarding import OnboardingService
 from budget_bot.services.reports import ReportService
 from budget_bot.storage import BudgetStore
-from budget_bot.storage.models import Batch, Outbox, TransactionRevision
+from budget_bot.storage.models import Account, Batch, Outbox, Request, TransactionRevision
 from budget_bot.telegram.calendar import day_view
 from budget_bot.telegram.transport import TelegramTransport
 from budget_bot.workflows import BudgetWorkflow, postgres_checkpointer
@@ -94,7 +94,8 @@ def message(actor, text, *, at=NOW, chat_type='private', sender=None, is_bot=Fal
 def callback(actor, data):
     payload = message(actor, '')
     msg = payload.pop('message')
-    payload['callback_query'] = {'id': str(uuid4()), 'from': msg['from'], 'message': msg, 'data': data}
+    payload['callback_query'] = {'id': str(uuid4()), 'chat_instance': 'synthetic-r4-chat',
+                                 'from': msg['from'], 'message': msg, 'data': data}
     return payload
 
 
@@ -106,6 +107,19 @@ def review_button(reply, decision):
     selected = [data for data in buttons(reply) if data.startswith('rev:') and data.endswith(':' + decision)]
     assert len(selected) == 1, 'Review must expose one owner-bound ' + decision + ' button'
     return selected[0]
+
+
+def setup_button(reply, action):
+    selected = [data for data in buttons(reply) if data.startswith('setup:' + action + ':')]
+    assert len(selected) == 1
+    assert str(UUID(selected[0].split(':')[2])) == selected[0].split(':')[2]
+    return selected[0]
+
+
+def assert_same_review(actual, expected):
+    assert datetime.fromisoformat(actual['expires_at']) == datetime.fromisoformat(expected['expires_at'])
+    assert {k: v for k, v in actual.items() if k != 'expires_at'} == {
+        k: v for k, v in expected.items() if k != 'expires_at'}
 
 
 def commit(store, owner, actions):
@@ -164,7 +178,7 @@ async def test_ingress_setup_review_lifecycle(store, actors, onboarding, decisio
     assert 'opening' in reply['text'].lower(), 'Registered unfinished owner must enter setup'
     for value in ('100', 'Travel', '50'):
         reply = (await app.handle(message(actor, value), NOW))[0]
-    reply = (await app.handle(callback(actor, 'setup:finish'), NOW))[0]
+    reply = (await app.handle(callback(actor, setup_button(reply, 'finish')), NOW))[0]
     original = store.get_pending(owner)
     assert original is not None and store.get_snapshot(owner) == initial
     data = review_button(reply, decision)
@@ -179,8 +193,8 @@ async def test_ingress_setup_review_lifecycle(store, actors, onboarding, decisio
         if decision == 'edit':
             assert 'opening' in reply['text'].lower()
             for value in ('80', 'Travel', '30'):
-                await app.handle(message(actor, value), NOW)
-            new_reply = (await app.handle(callback(actor, 'setup:finish'), NOW))[0]
+                reply = (await app.handle(message(actor, value), NOW))[0]
+            new_reply = (await app.handle(callback(actor, setup_button(reply, 'finish')), NOW))[0]
             newer = store.get_pending(owner)
             assert newer['request_id'] != original['request_id']
             await app.handle(callback(actor, data), NOW)
@@ -253,7 +267,7 @@ async def test_ingress_foreign_review_is_safe_reply_not_retry_poison(store, acto
     assert 'not found' in reply['text'].lower() or 'not available' in reply['text'].lower()
     assert review['request_id'] not in reply['text']
     assert store.get_snapshot(owner) == before
-    assert store.get_pending(admin) == review
+    assert_same_review(store.get_pending(admin), review)
 
 
 async def test_ingress_invalid_finance_is_safe_and_no_write(store, actors, onboarding):
@@ -264,23 +278,15 @@ async def test_ingress_invalid_finance_is_safe_and_no_write(store, actors, onboa
         reply = (await controller(store, onboarding).handle(message(actor, '/allocate 51 Travel'), NOW))[0]
     except BudgetError as error:
         pytest.fail('Planner validation must become safe reply; escaped code=' + error.code, pytrace=False)
-    assert 'fund' in reply['text'].lower() or 'available' in reply['text'].lower()
+    assert reply['text'] == 'pool has ₹50.00; restore ₹1.00 to cover ₹51.00'
     assert store.get_snapshot(owner) == before and store.get_pending(owner) is None
 
 
 async def test_ingress_optional_conversation_injection_contract(store, onboarding):
-    class UnsupportedConversation:
-        async def dispatch(self, owner_id, text, received_at, now, *, query=None, callback_data=None):
-            return None
-
-        def menu(self):
-            return {'text': 'Synthetic menu seam', 'keyboard': []}
-
-    try:
-        BudgetController(store, workflow(store), onboarding, ReportService(store), AccessService(store),
-                         conversation=UnsupportedConversation())
-    except TypeError:
-        pytest.fail('Missing keyword-only BudgetController(..., conversation=None) seam', pytrace=False)
+    flow, reports = workflow(store), ReportService(store)
+    conversation = conversation_class()(store, flow, reports)
+    app = BudgetController(store, flow, onboarding, reports, AccessService(store), conversation=conversation)
+    assert app._conversation() is conversation
 
 
 async def test_ingress_conversation_module_runtime_gate():
@@ -441,12 +447,16 @@ async def test_supported_private_identity_gates(store, actors, onboarding, actor
         store.revoke_user(admin, actor, NOW)
     reply = await controller(store, onboarding).handle(payload, NOW)
     if actor_mode in {'unknown', 'revoked'}:
-        assert 'invite-only' in reply[0]['text']
+        assert ('revoked' if actor_mode == 'revoked' else 'invite-only') in reply[0]['text']
         assert 'Travel' not in reply[0]['text'] and '₹' not in reply[0]['text']
     else:
         assert reply == []
     if actor_mode != 'revoked':
         assert store.get_snapshot(owner) == before
+    else:
+        with pytest.raises(BudgetError) as error:
+            store.get_snapshot(owner)
+        assert error.value.code == 'access_denied'
 
 
 async def test_supported_offline_commands_review_replay_and_reports(store, actors, onboarding):
@@ -576,3 +586,701 @@ async def test_service_sdk_failure_is_redacted_and_offline_recovery_works(store,
         assert result['result']['snapshot']['buckets']['Travel']['balance'] == 4000
     finally:
         await client.close()
+
+
+def setup_state(onboarding, owner):
+    with onboarding.store.engine.connect() as connection:
+        return onboarding._load(connection, owner)
+
+
+async def setup_review(app, actor, opening='100', allocation='50'):
+    for text in ('/start', opening, 'Travel', allocation):
+        reply = (await app.handle(message(actor, text), NOW))[0]
+    return (await app.handle(callback(actor, setup_button(reply, 'finish')), NOW))[0]
+
+
+@pytest.mark.parametrize('action', ['back', 'cancel', 'finish', 'more'])
+async def test_generated_setup_buttons_fence_foreign_and_cancelled_drafts(store, actors, onboarding, action):
+    other_actor, other, actor, owner = actors
+    app = controller(store, onboarding)
+    initial = store.get_snapshot(owner)
+    for text in ('/start', '100', 'Travel', '50'):
+        reply = (await app.handle(message(actor, text), NOW))[0]
+    old = setup_button(reply, action)
+    await app.handle(message(other_actor, '/start'), NOW)
+    foreign_state = setup_state(onboarding, other)
+    foreign_reply = (await app.handle(callback(other_actor, old), NOW))[0]
+    assert 'no longer current' in foreign_reply['text']
+    assert setup_state(onboarding, other) == foreign_state
+    await app.handle(callback(actor, setup_button(reply, 'cancel')), NOW)
+    tombstone = setup_state(onboarding, owner)
+    assert tombstone['step'] == 'cancelled' and not onboarding.active(owner)
+    for data in (old, 'cal:2026-10', 'day:2026-10-06'):
+        rejected = (await app.handle(callback(actor, data), NOW))[0]
+        assert 'setup' in rejected['text'].lower()
+        assert setup_state(onboarding, owner) == tombstone
+        assert store.get_snapshot(owner) == initial and store.get_pending(owner) is None
+    newer = await setup_review(app, actor, '80', '30')
+    pending = store.get_pending(owner)
+    new_state = setup_state(onboarding, owner)
+    await app.handle(callback(actor, old), NOW)
+    assert setup_state(onboarding, owner) == new_state
+    assert_same_review(store.get_pending(owner), pending)
+    await app.handle(callback(actor, review_button(newer, 'confirm')), NOW)
+    assert store.get_snapshot(owner)['pool'] == 5000
+    assert store.get_snapshot(owner)['buckets']['Travel']['balance'] == 3000
+
+
+@pytest.mark.parametrize('decision', ['confirm', 'edit', 'cancel'])
+async def test_setup_review_foreign_and_stale_replay_cannot_change_new_review(store, actors, onboarding, decision):
+    other_actor, other, actor, owner = actors
+    app = controller(store, onboarding)
+    reply = await setup_review(app, actor)
+    old = review_button(reply, decision)
+    pending, before = store.get_pending(owner), store.get_snapshot(owner)
+    other_before = store.get_snapshot(other)
+    await app.handle(message(other_actor, '/start'), NOW)
+    foreign_state = setup_state(onboarding, other)
+    denied = (await app.handle(callback(other_actor, old), NOW))[0]
+    assert 'INR 100.00' not in denied['text'] and pending['request_id'] not in denied['text']
+    assert_same_review(store.get_pending(owner), pending)
+    assert setup_state(onboarding, other) == foreign_state
+    assert store.get_snapshot(other) == other_before and store.get_snapshot(owner) == before
+    await app.handle(callback(actor, review_button(reply, 'cancel')), NOW)
+    newer = await setup_review(app, actor, '80', '30')
+    new_pending, new_state = store.get_pending(owner), setup_state(onboarding, owner)
+    await app.handle(callback(actor, old), NOW)
+    assert_same_review(store.get_pending(owner), new_pending)
+    assert setup_state(onboarding, owner) == new_state and store.get_snapshot(owner) == before
+    await app.handle(callback(actor, review_button(newer, 'confirm')), NOW)
+    assert store.get_snapshot(owner)['pool'] == 5000
+
+
+@pytest.mark.parametrize('report', ['calendar', 'spending'])
+async def test_application_durable_report_clarification_original_receipt(
+        store, actors, onboarding, monkeypatch, report):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    commit(store, owner, [expense()])
+    before = store.get_snapshot(owner)
+    received = datetime(2026, 10, 31, 18, 29, tzinfo=timezone.utc)
+    answered = received + timedelta(minutes=2)
+    responses = iter([
+        {**interpretation('clarification'), 'missing_fields': ['period'],
+         'clarification_question': 'Which period?'},
+        interpretation('query', query={'report': report, 'period': 'month',
+                                      'start': None, 'end': None, 'bucket_name': None}),
+    ])
+    wire = []
+
+    def respond(request):
+        wire.append(json.loads(request.content))
+        return sdk_response(next(responses))
+
+    client = sdk_client(monkeypatch, respond)
+    try:
+        async with postgres_checkpointer(os.environ['BUDGET_TEST_DATABASE_URL'], schema='test_w8') as saver:
+            app = controller(store, onboarding, workflow(store, client, saver))
+            question = (await app.handle(message(actor, 'Show my spending calendar', at=received), received))[0]
+            assert 'reporting period' in question['text']
+            assert not question['keyboard'] and store.get_snapshot(owner) == before
+        async with postgres_checkpointer(os.environ['BUDGET_TEST_DATABASE_URL'], schema='test_w8') as saver:
+            app = controller(store, onboarding, workflow(store, client, saver))
+            result = (await app.handle(message(actor, 'this month', at=answered), answered))[0]
+            if report == 'calendar':
+                assert result['text'] == 'October 2026' and 'cal:2026-11' in buttons(result)
+            else:
+                assert '2026-10-01' in result['text'] and '2026-10-31' in result['text']
+                assert '₹10.00' in result['text'] and 'Travel' in result['text']
+            assert store.get_snapshot(owner) == before and store.get_pending(owner) is None
+        assert len(wire) == 2
+        for body in wire:
+            context = json.loads(body['input'][0]['content'])
+            assert context['local_date'] == '2026-10-31'
+            assert set(context) == {'message', 'bucket_names', 'local_date', 'timezone'}
+            assert body['store'] is False and str(actor) not in json.dumps(context)
+    finally:
+        await client.close()
+
+
+async def test_application_nl_correction_selection_restart_undo_and_readonly_reports(
+        store, actors, onboarding, monkeypatch):
+    _, other, actor, owner = actors
+    seed(store, owner)
+    seed(store, other)
+    foreign = commit(store, other, [expense('99', 'FOREIGN_SYNTHETIC_ONLY')])
+    foreign_id = next(t['id'] for t in foreign['snapshot']['transactions'] if t['type'] == 'expense')
+    responses = iter([
+        interpretation(actions=[expense()]),
+        interpretation(actions=[{'type': 'correct', 'reference': 'Metro', 'changes': {'amount_inr': '7'}}]),
+        interpretation(actions=[{'type': 'undo', 'reference': 'Metro'}]),
+    ])
+    client = sdk_client(monkeypatch, lambda request: sdk_response(next(responses)))
+    try:
+        async with postgres_checkpointer(os.environ['BUDGET_TEST_DATABASE_URL'], schema='test_w8') as saver:
+            app = controller(store, onboarding, workflow(store, client, saver))
+            before = store.get_snapshot(owner)
+            review = (await app.handle(message(actor, 'Record 10 for Metro in Travel'), NOW))[0]
+            assert store.get_snapshot(owner) == before
+            for decision in ('confirm', 'edit', 'cancel'):
+                review_button(review, decision)
+            confirm_data = review_button(review, 'confirm')
+        async with postgres_checkpointer(os.environ['BUDGET_TEST_DATABASE_URL'], schema='test_w8') as saver:
+            app = controller(store, onboarding, workflow(store, client, saver))
+            saved = await app.handle(callback(actor, confirm_data), NOW)
+            assert await app.handle(callback(actor, confirm_data), NOW) == saved
+            snapshot = store.get_snapshot(owner)
+            assert snapshot['buckets']['Travel']['balance'] == 4000 and snapshot['pool'] == 5000
+            own_id = next(t['id'] for t in snapshot['transactions'] if t['type'] == 'expense')
+            selection = (await app.handle(message(actor, 'Correct Metro to 7'), NOW))[0]
+            assert own_id in selection['text'] and foreign_id not in selection['text']
+            assert 'FOREIGN_SYNTHETIC_ONLY' not in selection['text'] and not selection['keyboard']
+        async with postgres_checkpointer(os.environ['BUDGET_TEST_DATABASE_URL'], schema='test_w8') as saver:
+            app = controller(store, onboarding, workflow(store, client, saver))
+            rejected = (await app.handle(message(actor, foreign_id), NOW))[0]
+            assert 'owner-scoped' in rejected['text'] and not rejected['keyboard']
+            assert store.get_snapshot(owner) == snapshot
+            review = (await app.handle(message(actor, own_id), NOW))[0]
+            assert store.get_pending(owner)['actions'][0]['transaction_id'] == own_id
+            assert store.get_snapshot(owner) == snapshot
+            await app.handle(callback(actor, review_button(review, 'confirm')), NOW)
+            corrected = store.get_snapshot(owner)
+            assert corrected['buckets']['Travel']['balance'] == 4300
+            for payload in (message(actor, '/spending today'), callback(actor, 'day:2026-10-06')):
+                report = (await app.handle(payload, NOW))[0]
+                assert '₹7.00' in report['text'] and 'FOREIGN_SYNTHETIC_ONLY' not in report['text']
+                assert store.get_snapshot(owner) == corrected
+            selection = (await app.handle(message(actor, 'Undo Metro'), NOW))[0]
+            assert own_id in selection['text'] and not selection['keyboard']
+            review = (await app.handle(message(actor, own_id), NOW))[0]
+            assert store.get_snapshot(owner) == corrected
+            await app.handle(callback(actor, review_button(review, 'confirm')), NOW)
+            assert store.get_snapshot(owner)['buckets']['Travel']['balance'] == 5000
+            assert store.spending(owner, NOW.date(), NOW.date())['count'] == 0
+            with store.engine.connect() as connection:
+                rows = connection.execute(select(TransactionRevision.revision, TransactionRevision.amount,
+                                                 TransactionRevision.state, TransactionRevision.previous).where(
+                    TransactionRevision.transaction_id == own_id).order_by(TransactionRevision.revision)).all()
+            assert [r.revision for r in rows] == [1, 2, 3]
+            assert [r.amount for r in rows[:2]] == [1000, 700]
+            assert rows[1].previous == rows[0].state and rows[2].previous == rows[1].state
+            assert not rows[2].state['active']
+    finally:
+        await client.close()
+
+
+class TelegramWire(BaseRequest):
+    """Controlled network only; Bot parsing/serialization and application are real."""
+
+    def __init__(self):
+        self.bot_id = synthetic_id()
+        self.updates = []
+        self.calls = []
+        self.fail_next_send = False
+
+    @property
+    def read_timeout(self):
+        return 1
+
+    async def initialize(self):
+        pass
+
+    async def shutdown(self):
+        pass
+
+    async def do_request(self, url, method, request_data=None, **kwargs):
+        name = url.rsplit('/', 1)[-1]
+        params = request_data.parameters if request_data else {}
+        self.calls.append((name, params))
+        if name == 'getMe':
+            result = {'id': self.bot_id, 'is_bot': True, 'first_name': 'Synthetic', 'username': 'R4TestBot'}
+        elif name == 'getUpdates':
+            result = self.updates
+        elif name == 'answerCallbackQuery':
+            result = True
+        elif name == 'sendMessage':
+            if self.fail_next_send:
+                self.fail_next_send = False
+                raise TimedOut('SYNTHETIC_TRANSPORT_PRIVATE')
+            result = {'message_id': 1, 'date': int(NOW.timestamp()),
+                      'chat': {'id': params['chat_id'], 'type': 'private'}, 'text': params['text']}
+        else:
+            raise AssertionError('Unexpected controlled Telegram method: ' + name)
+        return 200, json.dumps({'ok': True, 'result': result}).encode()
+
+
+def outbox_rows(store, bot_id):
+    with store.engine.connect() as connection:
+        return list(connection.execute(select(Outbox.__table__).where(
+            Outbox.bot_id == str(bot_id)).order_by(Outbox.update_id, Outbox.position)).mappings())
+
+
+def crash_before_completion(*args, **kwargs):
+    raise RuntimeError('SYNTHETIC_DATABASE_PRIVATE')
+
+
+async def test_application_sdk_transport_duplicate_confirm_crash_retry_and_bot_scope(
+        store, actors, onboarding, monkeypatch, caplog):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    wire, app = TelegramWire(), controller(store, onboarding)
+    original = message(actor, '/expense 10 Travel Metro')
+    original['update_id'] = 10
+    wire.updates = [original, original]
+    other_bot = synthetic_id()
+    store.save_update(other_bot, 10, message(actor, '/balance'), NOW)
+    async with Bot('123:SYNTHETIC_R4', request=wire, get_updates_request=wire) as bot:
+        transport = TelegramTransport(bot, store, app)
+        assert await transport.poll_once(NOW) == 1
+        assert store.get_snapshot(owner)['buckets']['Travel']['balance'] == 5000
+        rows = outbox_rows(store, bot.id)
+        assert len(rows) == 1
+        data = review_button(rows[0], 'confirm')
+        confirmation = callback(actor, data)
+        confirmation['update_id'] = 12
+        wire.updates = [confirmation, confirmation]
+        with monkeypatch.context() as fault:
+            fault.setattr(store, 'complete_update', crash_before_completion)
+            assert await transport.poll_once(NOW) == 0
+        assert store.get_snapshot(owner)['buckets']['Travel']['balance'] == 4000
+        assert store.polling_offset(bot.id) == 13
+        assert len(store.pending_updates(bot_id=bot.id)) == 1
+        wire.updates = []
+        assert await TelegramTransport(bot, store, controller(store, onboarding)).poll_once(NOW) == 1
+        assert not store.pending_updates(bot_id=bot.id)
+        assert len(store.pending_updates(bot_id=other_bot)) == 1
+        assert store.spending(owner, NOW.date(), NOW.date())['count'] == 1
+        assert len(outbox_rows(store, bot.id)) == 2
+        assert await transport.deliver_once(NOW) == 2
+        sent = [params for name, params in wire.calls if name == 'sendMessage']
+        assert len(sent) == 2 and 'Recorded.' in sent[1]['text']
+        assert all(params['chat_id'] == actor for params in sent)
+        assert all(row['delivered_at'] is not None for row in outbox_rows(store, bot.id))
+        assert 'SYNTHETIC_DATABASE_PRIVATE' not in caplog.text
+
+
+async def test_application_provider_outage_commands_and_retry_errors(store, actors, onboarding, monkeypatch, caplog):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    calls = []
+
+    def unavailable(request):
+        calls.append(request)
+        raise httpx.ReadTimeout('SYNTHETIC_PROVIDER_PRIVATE', request=request)
+
+    client = sdk_client(monkeypatch, unavailable)
+    try:
+        app = controller(store, onboarding, workflow(store, client))
+        initial = store.get_snapshot(owner)
+        output = (await app.handle(message(actor, 'Record 10 Metro in Travel'), NOW))[0]
+        assert 'unavailable' in output['text'] and not output['keyboard'] and len(calls) == 1
+        assert store.get_snapshot(owner) == initial and store.get_pending(owner) is None
+        review = (await app.handle(message(actor, '/expense 10 Travel Metro'), NOW))[0]
+        await app.handle(callback(actor, review_button(review, 'confirm')), NOW)
+        before = store.get_snapshot(owner)
+        for payload in (message(actor, '/balance'), message(actor, '/spending today'),
+                        message(actor, '/calendar'), callback(actor, 'day:2026-10-06')):
+            assert (await app.handle(payload, NOW))[0]['text']
+            assert store.get_snapshot(owner) == before
+        assert len(calls) == 1
+        wire = TelegramWire()
+        wire.updates = [message(actor, '/spending today')]
+        async with Bot('123:SYNTHETIC_R4', request=wire, get_updates_request=wire) as bot:
+            transport = TelegramTransport(bot, store, app)
+
+            def broken_report(*args, **kwargs):
+                raise RuntimeError('SYNTHETIC_REPORT_PRIVATE')
+
+            with monkeypatch.context() as fault:
+                fault.setattr(app.reports, 'spending', broken_report)
+                assert await transport.poll_once(NOW) == 0
+            assert len(store.pending_updates(bot_id=bot.id)) == 1 and not outbox_rows(store, bot.id)
+            wire.updates = []
+            assert await transport.poll_once(NOW + timedelta(seconds=1)) == 1
+            assert '₹10.00' in outbox_rows(store, bot.id)[0]['text']
+        assert 'SYNTHETIC_REPORT_PRIVATE' not in caplog.text
+        assert 'SYNTHETIC_PROVIDER_PRIVATE' not in output['text']
+    finally:
+        await client.close()
+
+
+async def test_transport_reply_order_claim_limit_backoff_and_fencing(store, actors, onboarding, caplog):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    wire = TelegramWire()
+    async with Bot('123:SYNTHETIC_R4', request=wire, get_updates_request=wire) as bot:
+        app = controller(store, onboarding)
+        transport = TelegramTransport(bot, store, app)
+        # Real application report replies, persisted together to exercise the 20-item claim boundary.
+        replies = []
+        for index in range(25):
+            reply = (await app.handle(message(actor, '/balance' if index % 2 else '/calendar'), NOW))[0]
+            replies.append(reply)
+        payload = message(actor, '/balance')
+        store.save_update(bot.id, payload['update_id'], payload, NOW)
+        store.complete_update(payload['update_id'], replies, NOW, bot_id=bot.id)
+        wire.fail_next_send = True
+        assert await transport.deliver_once(NOW) == 19
+        # A failed first send is delayed, while later replies can already be delivered.
+        rows = outbox_rows(store, bot.id)
+        assert rows[0]['delivered_at'] is None
+        assert all(row['delivered_at'] is not None for row in rows[1:20])
+        assert await transport.deliver_once(NOW) == 5
+        assert [p['text'] for name, p in wire.calls if name == 'sendMessage'] == [r['text'] for r in replies]
+        later = NOW + timedelta(seconds=3)
+        lease = store.pending_outbox(later, bot_id=bot.id)
+        assert len(lease) == 1 and lease[0]['text'] == replies[0]['text']
+        assert store.ack_outbox(lease[0]['id'], str(uuid4()), later) is False
+        assert store.fail_outbox(lease[0]['id'], lease[0]['lease_token'], later) is True
+        assert store.ack_outbox(lease[0]['id'], lease[0]['lease_token'], later) is False
+        assert await transport.deliver_once(NOW + timedelta(seconds=8)) == 1
+        assert all(row['delivered_at'] is not None for row in outbox_rows(store, bot.id))
+        assert 'SYNTHETIC_TRANSPORT_PRIVATE' not in caplog.text
+
+
+async def test_defect_setup_answer_replay_must_not_answer_next_question(store, actors, onboarding, monkeypatch):
+    """Strict recovery gate: crash after draft save but before inbox completion."""
+    _, _, actor, owner = actors
+    app, wire = controller(store, onboarding), TelegramWire()
+    await app.handle(message(actor, '/start'), NOW)
+    wire.updates = [message(actor, '100')]
+    async with Bot('123:SYNTHETIC_R4', request=wire, get_updates_request=wire) as bot:
+        transport = TelegramTransport(bot, store, app)
+        with monkeypatch.context() as fault:
+            fault.setattr(store, 'complete_update', crash_before_completion)
+            assert await transport.poll_once(NOW) == 0
+        saved = setup_state(onboarding, owner)
+        assert saved['step'] == 'name' and saved['opening'] == 10000
+        before = store.get_snapshot(owner)
+        wire.updates = []
+        assert await transport.poll_once(NOW) == 1
+        assert store.get_snapshot(owner) == before and store.get_pending(owner) is None
+        assert setup_state(onboarding, owner) == saved, 'Same inbox answer must not become a bucket name'
+
+
+async def test_defect_proposal_retry_must_return_original_review_buttons(store, actors, onboarding, monkeypatch):
+    """Strict recovery gate: persisted proposal with no durable review reply yet."""
+    _, _, actor, owner = actors
+    seed(store, owner)
+    wire, app = TelegramWire(), controller(store, onboarding)
+    wire.updates = [message(actor, '/expense 10 Travel Metro')]
+    async with Bot('123:SYNTHETIC_R4', request=wire, get_updates_request=wire) as bot:
+        transport = TelegramTransport(bot, store, app)
+        before = store.get_snapshot(owner)
+        with monkeypatch.context() as fault:
+            fault.setattr(store, 'complete_update', crash_before_completion)
+            assert await transport.poll_once(NOW) == 0
+        saved = store.get_pending(owner)
+        assert saved is not None and not outbox_rows(store, bot.id)
+        wire.updates = []
+        assert await transport.poll_once(NOW) == 1
+        assert_same_review(store.get_pending(owner), saved)
+        assert store.get_snapshot(owner) == before
+        reply = outbox_rows(store, bot.id)[0]
+        for decision in ('confirm', 'edit', 'cancel'):
+            assert review_button(reply, decision) == f'rev:{saved["request_id"]}:{saved["revision"]}:{decision}'
+
+
+async def test_defect_sdk_parse_failure_must_not_log_private_update(store, actors, onboarding, caplog):
+    """Privacy gate on the real SDK failure path; never use real private content."""
+    _, _, actor, owner = actors
+    seed(store, owner)
+    wire = TelegramWire()
+    payload = callback(actor, 'SYNTHETIC_PRIVATE_CALLBACK_CONTENT')
+    del payload['callback_query']['chat_instance']
+    wire.updates = [payload]
+    before = store.get_snapshot(owner)
+    async with Bot('123:SYNTHETIC_R4', request=wire, get_updates_request=wire) as bot:
+        transport = TelegramTransport(bot, store, controller(store, onboarding))
+        with pytest.raises(TypeError):
+            await transport.poll_once(NOW)
+        assert store.polling_offset(bot.id) == 0 and not store.pending_updates(bot_id=bot.id)
+        assert store.get_snapshot(owner) == before
+    assert 'SYNTHETIC_PRIVATE_CALLBACK_CONTENT' not in caplog.text, 'SDK parse errors must not expose update content'
+
+
+async def test_inbox_has_no_worker_claim_and_later_update_can_overtake_failure(
+        store, actors, onboarding, monkeypatch):
+    """Characterize a real limit, NOT acceptance of exactly-once or strict order."""
+    _, _, actor, owner = actors
+    seed(store, owner)
+    wire, app = TelegramWire(), controller(store, onboarding)
+    first, second = message(actor, '/spending today'), message(actor, '/balance')
+    first['update_id'], second['update_id'] = 10, 12
+    wire.updates = [first, second]
+    async with Bot('123:SYNTHETIC_R4', request=wire, get_updates_request=wire) as bot:
+        store.save_update(bot.id, 10, first, NOW)
+        # Independent consumers can read the exact same pending item; no claim token exists.
+        a = store.pending_updates(bot_id=bot.id)
+        b = store.pending_updates(bot_id=bot.id)
+        assert a == b and len(a) == 1 and 'lease_token' not in a[0]
+        transport = TelegramTransport(bot, store, app)
+        with monkeypatch.context() as fault:
+            fault.setattr(app.reports, 'spending', crash_before_completion)
+            assert await transport.poll_once(NOW) == 1
+        assert [row['update_id'] for row in store.pending_updates(bot_id=bot.id)] == [10]
+        assert [row['update_id'] for row in outbox_rows(store, bot.id)] == [12]
+        assert store.polling_offset(bot.id) == 13
+        wire.updates = []
+        assert await transport.poll_once(NOW + timedelta(seconds=1)) == 1
+        assert [row['update_id'] for row in outbox_rows(store, bot.id)] == [10, 12]
+
+
+@pytest.mark.parametrize('decision', ['confirm', 'edit', 'cancel'])
+async def test_revocation_blocks_pending_review_without_financial_change(store, actors, onboarding, decision):
+    admin_actor, _, actor, owner = actors
+    seed(store, owner)
+    app = controller(store, onboarding)
+    review = (await app.handle(message(actor, '/expense 10 Travel Metro'), NOW))[0]
+    pending = store.get_pending(owner)
+    with store.engine.connect() as connection:
+        before = connection.execute(select(Account.id, Account.balance).where(
+            Account.owner_id == owner).order_by(Account.id)).all()
+    await app.handle(message(admin_actor, '/revoke ' + str(actor)), NOW)
+    rejected = (await app.handle(callback(actor, review_button(review, decision)), NOW))[0]
+    assert rejected['text'] == 'Your access has been revoked. Contact the administrator.'
+    assert not rejected['keyboard'] and 'Travel' not in rejected['text']
+    with store.engine.connect() as connection:
+        assert connection.execute(select(Account.id, Account.balance).where(
+            Account.owner_id == owner).order_by(Account.id)).all() == before
+        assert connection.scalar(select(Request.status).where(
+            Request.owner_id == owner, Request.id == pending['request_id'])) == 'pending'
+        assert connection.scalar(select(func.count()).select_from(Batch).where(Batch.owner_id == owner)) == 1
+    fresh = store.create_invite(store.get_user(admin_actor)['owner_id'], NOW)
+    again = (await app.handle(message(actor, '/start ' + fresh), NOW))[0]
+    assert 'revoked' in again['text'] and not store.get_user(actor)['active']
+
+
+async def test_application_edit_rebuilds_review_and_stale_controls_do_not_commit(
+        store, actors, onboarding, monkeypatch):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    client = sdk_client(monkeypatch, lambda request: sdk_response(interpretation(actions=[expense('7')])))
+    try:
+        app = controller(store, onboarding, workflow(store, client))
+        initial = store.get_snapshot(owner)
+        original = (await app.handle(message(actor, '/expense 10 Travel Metro'), NOW))[0]
+        old = store.get_pending(owner)
+        question = (await app.handle(callback(actor, review_button(original, 'edit')), NOW))[0]
+        assert 'replacement' in question['text'] and not question['keyboard']
+        replacement = (await app.handle(message(actor, 'Make the Metro expense 7 in Travel'), NOW))[0]
+        newer = store.get_pending(owner)
+        assert newer['request_id'] == old['request_id'] and newer['revision'] > old['revision']
+        assert newer['actions'][0]['amount_inr'] == '7.00' and 'INR 7.00' in replacement['text']
+        for decision in ('edit', 'cancel'):
+            await app.handle(callback(actor, review_button(original, decision)), NOW)
+            assert_same_review(store.get_pending(owner), newer)
+        renewed = (await app.handle(callback(actor, review_button(original, 'confirm')), NOW))[0]
+        assert store.get_snapshot(owner) == initial
+        assert store.get_pending(owner)['revision'] > newer['revision']
+        await app.handle(callback(actor, review_button(renewed, 'confirm')), NOW)
+        assert store.get_snapshot(owner)['buckets']['Travel']['balance'] == 4300
+        assert store.spending(owner, NOW.date(), NOW.date())['total'] == 700
+    finally:
+        await client.close()
+
+
+async def test_application_combined_income_allocation_expense_atomic_and_target_warning(
+        store, actors, onboarding, monkeypatch):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    app = controller(store, onboarding)
+    target = (await app.handle(message(actor, '/target Travel 5'), NOW))[0]
+    assert store.get_snapshot(owner)['buckets']['Travel']['target'] is None
+    await app.handle(callback(actor, review_button(target, 'confirm')), NOW)
+    actions = [{'type': 'income', 'amount_inr': '20', 'description': 'Synthetic income'},
+               {'type': 'allocate', 'amount_inr': '20', 'bucket_name': 'Travel'}, expense('80')]
+    client = sdk_client(monkeypatch, lambda request: sdk_response(interpretation(actions=actions)))
+    try:
+        app = controller(store, onboarding, workflow(store, client))
+        before = store.get_snapshot(owner)
+        review = (await app.handle(message(actor, 'Income 20, allocate 20 to Travel, spend 80 Metro'), NOW))[0]
+        assert len(store.get_pending(owner)['actions']) == 3
+        assert store.get_snapshot(owner) == before
+        assert 'negative' in review['text'].lower() and 'target' in review['text'].lower()
+        await app.handle(callback(actor, review_button(review, 'confirm')), NOW)
+        snapshot = store.get_snapshot(owner)
+        assert snapshot['pool'] == 5000 and snapshot['buckets']['Travel']['balance'] == -1000
+        assert store.spending(owner, NOW.date(), NOW.date())['total'] == 8000
+        txs = snapshot['transactions'][-3:]
+        assert [t['type'] for t in txs] == ['income', 'allocate', 'expense']
+        assert len({t['batch_id'] for t in txs}) == 1
+    finally:
+        await client.close()
+
+
+async def test_application_reversal_shortage_and_future_expense_reject_without_review(store, actors, onboarding):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    app = controller(store, onboarding)
+    review = (await app.handle(message(actor, '/income 10 Synthetic'), NOW))[0]
+    await app.handle(callback(actor, review_button(review, 'confirm')), NOW)
+    income_id = next(t['id'] for t in store.get_snapshot(owner)['transactions'] if t['type'] == 'income')
+    review = (await app.handle(message(actor, '/allocate 60 Travel'), NOW))[0]
+    await app.handle(callback(actor, review_button(review, 'confirm')), NOW)
+    before = store.get_snapshot(owner)
+    for command in ('/undo ' + income_id, '/correct ' + income_id + ' amount=5'):
+        reply = (await app.handle(message(actor, command), NOW))[0]
+        assert 'pool has ₹0.00' in reply['text'] and 'restore' in reply['text'] and 'to cover' in reply['text']
+        assert not reply['keyboard'] and store.get_snapshot(owner) == before
+        assert store.get_pending(owner) is None
+    reply = (await app.handle(message(actor, '/expense 1 Travel Future 2026-10-07'), NOW))[0]
+    assert 'future' in reply['text'].lower() and not reply['keyboard']
+    assert store.get_snapshot(owner) == before and store.get_pending(owner) is None
+
+
+async def test_application_expired_review_cannot_commit(store, actors, onboarding):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    app = controller(store, onboarding)
+    review = (await app.handle(message(actor, '/expense 10 Travel Metro'), NOW))[0]
+    saved, before = store.get_pending(owner), store.get_snapshot(owner)
+    expired = (await app.handle(callback(actor, review_button(review, 'confirm')), NOW + timedelta(minutes=31)))[0]
+    assert 'expired' in expired['text'].lower() and store.get_snapshot(owner) == before
+    assert_same_review(store.get_pending(owner), saved)
+
+
+async def test_sdk_invite_guided_setup_durable_confirm_and_calendar(store, actors, onboarding):
+    _, admin, _, _ = actors
+    actor = synthetic_id()
+    invite = store.create_invite(admin, NOW)
+    wire = TelegramWire()
+    async with Bot('123:SYNTHETIC_R4', request=wire, get_updates_request=wire) as bot:
+        async with postgres_checkpointer(os.environ['BUDGET_TEST_DATABASE_URL'], schema='test_w8') as saver:
+            app = controller(store, onboarding, workflow(store, saver=saver))
+            transport = TelegramTransport(bot, store, app)
+            for update_id, text in enumerate(('/start ' + invite, '100', 'Travel', '50'), start=1):
+                payload = message(actor, text)
+                payload['update_id'] = update_id
+                wire.updates = [payload]
+                assert await transport.poll_once(NOW) == 1
+                assert await transport.deliver_once(NOW) == 1
+            owner = store.get_user(actor)['owner_id']
+            assert not store.get_snapshot(owner)['onboarded'] and store.get_snapshot(owner)['pool'] == 0
+            reply = outbox_rows(store, bot.id)[-1]
+            payload = callback(actor, setup_button(reply, 'finish'))
+            payload['update_id'] = 5
+            wire.updates = [payload]
+            assert await transport.poll_once(NOW) == 1
+            assert await transport.deliver_once(NOW) == 1
+            reply = outbox_rows(store, bot.id)[-1]
+            confirm_data = review_button(reply, 'confirm')
+            assert store.get_snapshot(owner)['pool'] == 0
+        async with postgres_checkpointer(os.environ['BUDGET_TEST_DATABASE_URL'], schema='test_w8') as saver:
+            app = controller(store, onboarding, workflow(store, saver=saver))
+            transport = TelegramTransport(bot, store, app)
+            payload = callback(actor, confirm_data)
+            payload['update_id'] = 6
+            wire.updates = [payload, payload]
+            assert await transport.poll_once(NOW) == 1
+            assert await transport.deliver_once(NOW) == 1
+            snapshot = store.get_snapshot(owner)
+            assert snapshot['onboarded'] and snapshot['pool'] == 5000
+            assert snapshot['buckets']['Travel']['balance'] == 5000
+            payload = message(actor, '/calendar')
+            payload['update_id'] = 7
+            wire.updates = [payload]
+            assert await transport.poll_once(NOW) == 1
+            assert await transport.deliver_once(NOW) == 1
+            assert outbox_rows(store, bot.id)[-1]['text'] == 'October 2026'
+            assert store.get_snapshot(owner) == snapshot and store.polling_offset(bot.id) == 8
+            assert {name for name, _ in wire.calls} <= {'getMe', 'getUpdates', 'sendMessage', 'answerCallbackQuery'}
+
+
+async def test_application_transaction_failure_rolls_back_entire_batch_then_retries(
+        store, actors, onboarding, monkeypatch):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    actions = [{'type': 'income', 'amount_inr': '5', 'description': 'Synthetic'},
+               {'type': 'allocate', 'amount_inr': '5', 'bucket_name': 'Travel'}, expense('5')]
+    client = sdk_client(monkeypatch, lambda request: sdk_response(interpretation(actions=actions)))
+    try:
+        app = controller(store, onboarding, workflow(store, client))
+        before = store.get_snapshot(owner)
+        review = (await app.handle(message(actor, 'Income 5, allocate 5 Travel, spend 5 Metro'), NOW))[0]
+        pending = store.get_pending(owner)
+        real_commit = store._commit
+
+        def fail_after_writes(*args, **kwargs):
+            real_commit(*args, **kwargs)
+            raise RuntimeError('Synthetic transaction fault')
+
+        with monkeypatch.context() as fault:
+            fault.setattr(store, '_commit', fail_after_writes)
+            with pytest.raises(RuntimeError, match='Synthetic transaction fault'):
+                await app.handle(callback(actor, review_button(review, 'confirm')), NOW)
+        assert store.get_snapshot(owner) == before
+        assert_same_review(store.get_pending(owner), pending)
+        with store.engine.connect() as connection:
+            assert connection.scalar(select(func.count()).select_from(Batch).where(Batch.owner_id == owner)) == 1
+        await app.handle(callback(actor, review_button(review, 'confirm')), NOW)
+        assert store.get_snapshot(owner)['pool'] == 5000
+        assert store.get_snapshot(owner)['buckets']['Travel']['balance'] == 5000
+        assert store.spending(owner, NOW.date(), NOW.date())['total'] == 500
+    finally:
+        await client.close()
+
+
+async def test_application_missing_bucket_requires_selection_and_no_implicit_creation(
+        store, actors, onboarding, monkeypatch):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    # The SDK schema requires complete expense actions: missing bucket is a
+    # clarification envelope, not an invalid partial mutation passed around it.
+    clarification = {**interpretation('clarification'), 'missing_fields': ['bucket_name'],
+                     'clarification_question': 'Choose a bucket'}
+    outputs = iter([clarification, clarification, interpretation(actions=[expense('4')])])
+    client = sdk_client(monkeypatch, lambda request: sdk_response(next(outputs)))
+    try:
+        app = controller(store, onboarding, workflow(store, client))
+        before = store.get_snapshot(owner)
+        question = (await app.handle(message(actor, 'Spent 4 Metro'), NOW))[0]
+        assert 'bucket' in question['text'].lower() and 'Travel' in question['text'] and not question['keyboard']
+        rejected = (await app.handle(message(actor, 'Unknown bucket'), NOW))[0]
+        assert not rejected['keyboard'] and store.get_snapshot(owner) == before
+        assert store.get_pending(owner) is None
+        review = (await app.handle(message(actor, 'Travel'), NOW))[0]
+        assert 'INR 4.00' in review['text']
+        assert store.get_snapshot(owner) == before
+        await app.handle(callback(actor, review_button(review, 'confirm')), NOW)
+        assert store.get_snapshot(owner)['buckets']['Travel']['balance'] == 4600
+        assert set(store.get_snapshot(owner)['buckets']) == {'Travel'}
+    finally:
+        await client.close()
+
+
+async def test_application_transfer_source_shortage_and_calendar_pagination(store, actors, onboarding):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    app = controller(store, onboarding)
+    for command in ('/bucket Food', '/transfer 10 Travel Food'):
+        before = store.get_snapshot(owner)
+        review = (await app.handle(message(actor, command), NOW))[0]
+        assert store.get_snapshot(owner) == before
+        await app.handle(callback(actor, review_button(review, 'confirm')), NOW)
+    before = store.get_snapshot(owner)
+    assert before['buckets']['Travel']['balance'] == 4000 and before['buckets']['Food']['balance'] == 1000
+    rejected = (await app.handle(message(actor, '/transfer 11 Food Travel'), NOW))[0]
+    assert 'restore ₹1.00' in rejected['text'] and store.get_snapshot(owner) == before
+    assert store.get_pending(owner) is None
+    for index in range(9):
+        review = (await app.handle(message(actor, f'/expense 1 Travel Synthetic-{index}'), NOW))[0]
+        await app.handle(callback(actor, review_button(review, 'confirm')), NOW)
+    before = store.get_snapshot(owner)
+    first = (await app.handle(callback(actor, 'day:2026-10-06'), NOW))[0]
+    assert first['text'].count('Synthetic-') == 8
+    assert 'day:2026-10-06:1' in buttons(first)
+    last = (await app.handle(callback(actor, 'day:2026-10-06:1'), NOW))[0]
+    assert last['text'].count('Synthetic-') == 1
+    assert 'Total spent: ₹9.00' in first['text'] and 'Total spent: ₹9.00' in last['text']
+    assert store.get_snapshot(owner) == before
+
+
+@pytest.mark.parametrize('text', ['/expense', '/income 1e3 Salary', '/allocate 1.001 Travel', '/timezone Bad/Zone'])
+async def test_input_validation_safe_no_write(store, actors, onboarding, text):
+    _, _, actor, owner = actors
+    seed(store, owner)
+    before = store.get_snapshot(owner)
+    reply = (await controller(store, onboarding).handle(message(actor, text), NOW))[0]
+    assert '/help' in reply['text'] and not reply['keyboard']
+    assert store.get_snapshot(owner) == before and store.get_pending(owner) is None
