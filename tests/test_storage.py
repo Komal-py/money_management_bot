@@ -1,8 +1,6 @@
 """Real PostgreSQL storage tests; the planner double is deliberately test-local."""
 import copy
 import os
-import sys
-import types
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
@@ -11,13 +9,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-
-class TestBudgetError(ValueError):
-    __test__ = False
-
-    def __init__(self, code, message):
-        self.code, self.message = code, message
-        super().__init__(message)
+from budget_bot.domain.errors import BudgetError
+from budget_bot.storage import BudgetStore
 
 
 def local_plan(snapshot, actions, received_at):
@@ -30,7 +23,7 @@ def local_plan(snapshot, actions, received_at):
         if kind == 'create_bucket':
             name = a['name'].strip()
             if any(n.casefold() == name.casefold() for n in s['buckets']):
-                raise TestBudgetError('duplicate_bucket', 'Bucket already exists.')
+                raise BudgetError('duplicate_bucket', 'Bucket already exists.')
             s['buckets'][name] = {'id': str(uuid4()), 'balance': 0, 'target': None}
             metadata.append({'type': kind, 'name': name})
             continue
@@ -45,7 +38,7 @@ def local_plan(snapshot, actions, received_at):
             old = next(t for t in s['transactions'] if t['id'] == a['transaction_id'])
             previous = copy.deepcopy(old)
             if not old['active']:
-                raise TestBudgetError('inactive_transaction', 'Transaction is inactive.')
+                raise BudgetError('inactive_transaction', 'Transaction is inactive.')
             original = effects(old)
             for account, delta in original:
                 apply(s, account, -delta, old['id'], postings, False)
@@ -68,7 +61,7 @@ def local_plan(snapshot, actions, received_at):
             amount = int(a['amount_inr']) * 100
             if kind == 'opening':
                 if s['onboarded']:
-                    raise TestBudgetError('already_onboarded', 'Opening already recorded.')
+                    raise BudgetError('already_onboarded', 'Opening already recorded.')
                 s['onboarded'] = True
                 s['opening_date'] = received_at.date().isoformat()
             t = {'id': str(uuid4()), 'batch_id': batch, 'type': kind, 'amount': amount,
@@ -77,7 +70,7 @@ def local_plan(snapshot, actions, received_at):
                  'date': a.get('date_expression') or received_at.date().isoformat(),
                  'active': True, 'revision': 1}
             if kind == 'expense' and date.fromisoformat(t['date']) > received_at.date():
-                raise TestBudgetError('future_date', 'Future expenses are invalid.')
+                raise BudgetError('future_date', 'Future expenses are invalid.')
             for account, delta in effects(t):
                 apply(s, account, delta, t['id'], postings, kind == 'expense')
             s['transactions'].append(t)
@@ -102,31 +95,13 @@ def effects(t):
 def apply(s, account, delta, transaction_id, postings, expense):
     balance = s['pool'] if account == 'pool' else s['buckets'][account]['balance']
     if delta < 0 and balance + delta < 0 and not expense:
-        raise TestBudgetError('insufficient_funds', 'Restore source funds first.')
+        raise BudgetError('insufficient_funds', 'Restore source funds first.')
     if account == 'pool':
         s['pool'] += delta
     else:
         s['buckets'][account]['balance'] += delta
     postings.append({'account': account, 'amount': delta, 'transaction_id': transaction_id})
 
-
-# Only fill the missing W1 modules in this isolated worker test process.
-try:
-    import budget_bot.domain.errors  # noqa: F401
-except ModuleNotFoundError:
-    domain = types.ModuleType('budget_bot.domain')
-    domain.__path__ = []
-    errors = types.ModuleType('budget_bot.domain.errors')
-    errors.BudgetError = TestBudgetError
-    planner = types.ModuleType('budget_bot.domain.planner')
-    planner.plan = local_plan
-    money = types.ModuleType('budget_bot.domain.money')
-    money.parse_money = lambda value: int(value) * 100
-    sys.modules.update({'budget_bot.domain': domain, 'budget_bot.domain.errors': errors,
-                        'budget_bot.domain.planner': planner, 'budget_bot.domain.money': money})
-
-from budget_bot.storage import BudgetStore  # noqa: E402
-from budget_bot.domain.errors import BudgetError  # noqa: E402
 
 NOW = datetime(2026, 10, 6, 10, tzinfo=timezone.utc)
 
