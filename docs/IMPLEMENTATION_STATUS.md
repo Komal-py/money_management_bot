@@ -51,3 +51,13 @@ Source startup/private-controller/NL/report/calendar assembly is now integrated 
 Implementation remains authorized in `C:/Users/FL_LPT-657/Projects/telegram_bot`. No live owner finances were recorded. Tests use only approved existing PostgreSQL resources and isolated schemas; no new server/container was created. Live Telegram/AI calls were not made by these integrated seam tests; the Responses SDK HTTP layer is controlled. The review retry used an existing approved agent route with low effort and a short runtime cap; tariffs remain unverified. Source Hermes configuration/credentials are unchanged. Project credentials/private files remain ignored. The three-hour wake-lock has expired; no renewal or permanent sleep-setting change.
 
 Earlier failed worker attempts, the 147-test baseline and the 251-pass integrated transport stage are historical, not additive current totals. Reused worker work was preserved, and no duplicate eight-worker wave was launched.
+
+
+## Coordinator final local verification (R4 repairs, R5 superseded)
+
+- R4 retry returned an independent acceptance/security suite; it found replay-identity and SDK log-privacy defects. Coordinator fixed them on main (`3c832fb`): Telegram update identity now includes a payload digest, setup answers record their operation id, and SDK log records are scrubbed. Delegated repair attempts `deleg_cb282a73` and `deleg_733ab546` failed on HTTP 429 and are preserved as failures; their partial files were not merged.
+- R5's verifier was not accepted (failed review: archive false positives, cleanup, fingerprint gaps). Coordinator replaced it with `.private/verify_wave.py` (exact per-schema mapping), an updated CI file list, and a real-secret archive scan.
+- Fresh frozen regression: **35 test files exactly once, 701 tests, 701 passed, 0 failures/errors/skips/xfails**; Ruff and `git diff --check` clean; source unchanged during run.
+- CI workflow now lists all 35 files once across 9 isolated schemas (accounted locally; remote CI not yet run).
+- Build: wheel (34 members) and sdist (120 members) built; no private paths; `python -m budget_bot --help` works. Archive scan against actual local configuration values found the real AI endpoint URL in `docs/HLD.md`; it is now replaced with a placeholder and the rescan is clean. That URL still exists in one earlier local commit.
+- Not yet done: live bounded startup smoke against Telegram, GitHub push, remote CI.

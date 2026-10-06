@@ -14,7 +14,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16
@@ -60,7 +60,7 @@ jobs:
       - name: Independent acceptance (test_w8 only)
         env:
           BUDGET_TEST_SCHEMA: test_w8
-        run: uv run --no-sync pytest -p pytest_asyncio.plugin tests/test_acceptance_baseline.py -q
+        run: uv run --no-sync pytest -p pytest_asyncio.plugin tests/test_acceptance_baseline.py tests/test_acceptance_release.py -q
       - name: Onboarding and access (test_w3 only)
         env:
           BUDGET_TEST_SCHEMA: test_w3
@@ -77,28 +77,35 @@ jobs:
           BUDGET_TEST_SCHEMA: test_w6
         run: >-
           uv run --no-sync pytest -p pytest_asyncio.plugin
-          tests/test_workflow.py tests/test_workflow_integrated.py -q
+          tests/test_workflow.py tests/test_workflow_integrated.py
+          tests/test_workflow_query_clarification.py tests/test_controller_integrated.py -q
       - name: Durable Telegram transport (test_w4 only)
         env:
           BUDGET_TEST_SCHEMA: test_w4
         run: >-
           uv run --no-sync pytest -p pytest_asyncio.plugin
-          tests/test_telegram_commands.py tests/test_telegram_transport.py
+          tests/test_telegram_commands.py tests/test_telegram_privacy.py tests/test_telegram_transport.py
           tests/test_telegram_store_integration.py -q
       - name: Reports and calendar components (test_w7 only)
         env:
           BUDGET_TEST_SCHEMA: test_w7
         run: >-
           uv run --no-sync pytest -p pytest_asyncio.plugin
+          tests/test_conversation.py tests/test_conversation_dependency_errors.py
           tests/test_reports.py tests/test_reports_calendar.py tests/test_reports_integration.py -q
       - name: Remaining financial core and controller tests (test_w2)
         env:
           BUDGET_TEST_SCHEMA: test_w2
         run: >-
           uv run --no-sync pytest -p pytest_asyncio.plugin
-          tests/test_storage_planner.py tests/test_settings.py
+          tests/test_storage_planner.py
           tests/test_controller.py tests/test_controller_commands.py tests/test_controller_reports.py
+          tests/test_controller_ingress.py tests/test_controller_lifecycle.py tests/test_controller_setup_replay.py
           tests/test_domain_dates.py tests/test_domain_money.py tests/test_domain_planner.py -q
+      - name: Startup and settings (test_w1 only)
+        env:
+          BUDGET_TEST_SCHEMA: test_w1
+        run: uv run --no-sync pytest -p pytest_asyncio.plugin tests/test_runtime.py tests/test_settings.py -q
       - name: Build distribution (not runtime startup)
         # PEP 517 installs the declared hatchling backend in a separate build env.
         run: uv run --no-sync python -m build
