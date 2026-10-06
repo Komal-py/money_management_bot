@@ -83,7 +83,7 @@ async def test_actual_invite_setup_menu_commands_calendar_and_offline_nl(db):
         saved = await confirm(app, actor, review)
         assert 'recorded' in saved[0]['text'].lower()
         menu = await app.handle(private(actor, '/start'), NOW)
-        assert 'virtual INR' in menu[0]['text'] and '/calendar' in menu[0]['text']
+        assert 'virtual INR' in menu[0]['text'] and 'type /' in menu[0]['text']
         assert app.conversation.__class__.__name__ == 'ConversationRouter'
         before = db.get_snapshot(owner)
         assert before['onboarded'] and before['pool'] == 6000
@@ -184,9 +184,12 @@ async def test_actual_menu_buttons_and_spending_period_picker_are_read_only(db):
         assert '/start' in early[0]['text'] and db.get_pending(owner) is None
         await confirm(app, actor, await guided_setup(app, actor))
         before = db.get_snapshot(owner)
-        menu = await app.handle(private(actor, '🏠 Menu'), NOW)
+        menu = await app.handle(private(actor, '/start'), NOW)
         assert menu[0]['keyboard'] == main_menu_keyboard()
         assert '₹60.00' in (await app.handle(private(actor, '💰 Balance'), NOW))[0]['text']
+        entry = await app.handle(private(actor, '➕ Add expense'), NOW)
+        assert 'how much' in entry[0]['text'].lower()
+        await app.handle(private(actor, '/cancel'), NOW)
         picker = await app.handle(private(actor, '📊 Spending'), NOW)
         assert control(picker, 'This week') == 'sp:week'
         report = await app.handle(button(actor, control(picker, 'This month')), NOW)

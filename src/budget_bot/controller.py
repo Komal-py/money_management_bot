@@ -22,6 +22,11 @@ class BudgetController:
         self.access = access
         self.conversation = conversation
         self.guided = guided
+        if self.guided is None:
+            # Always present: menu taps, typed step answers and /cancel must all
+            # reach the same draft holder (production main.py does not inject one).
+            from budget_bot.services.guided_entry import GuidedEntry
+            self.guided = GuidedEntry(store, workflow)
         if command_parser is None:
             from budget_bot.telegram.commands import parse_command
             command_parser = parse_command
@@ -201,7 +206,7 @@ class BudgetController:
         if text in ('entry:expense', 'entry:income'):
             if self.onboarding is not None and not user.get('onboarded'):
                 return self._setup_output(self.onboarding.handle(owner, '/start', now))
-            return self.guided.start(owner, text.split(':')[1], now)
+            return self._guided().start(owner, text.split(':')[1], now)
         receipt = message.get('date', int(now.timestamp()))
         try:
             if type(receipt) is not int:
@@ -209,9 +214,8 @@ class BudgetController:
             received = datetime.fromtimestamp(receipt, timezone.utc)
         except (ValueError, OverflowError, OSError):
             return 'That message timestamp is invalid. Please send it again.'
-        if (not text.startswith('/') and user.get('onboarded') and self.guided is not None
-                and self.guided.active(owner, now)):
-            return await self.guided.handle_text(owner, text, received, now, operation=operation)
+        if not text.startswith('/') and user.get('onboarded') and self._guided().active(owner, now):
+            return await self._guided().handle_text(owner, text, received, now, operation=operation)
         if text.startswith('/') and self.command_parser:
             if _BARE_SPENDING.fullmatch(text):
                 if self.onboarding is not None and not user.get('onboarded'):
@@ -233,7 +237,7 @@ class BudgetController:
                     return self._menu()
                 return self._setup_output(self.onboarding.handle(owner, '/start', now))
             if command['kind'] == 'cancel':
-                if self.guided is not None and self.guided.cancel(owner):
+                if self._guided().cancel(owner):
                     return 'Entry cancelled. Nothing was saved.'
                 if self.onboarding is not None and self.onboarding.active(owner):
                     return self.onboarding.cancel(owner, now)

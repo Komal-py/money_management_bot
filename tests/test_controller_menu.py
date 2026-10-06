@@ -45,7 +45,7 @@ async def test_menu_button_runs_the_same_query_as_its_command(label, report):
 
 async def test_menu_and_help_buttons_reply_with_persistent_keyboard():
     controller, _, _ = app()
-    reply = (await controller.handle(message(text='🏠 Menu'), NOW))[0]
+    reply = (await controller.handle(message(text='/start'), NOW))[0]
     assert reply['text'] == 'Budget menu' and reply['keyboard'] == menu.main_menu_keyboard()
     reply = (await controller.handle(message(text='❓ Help'), NOW))[0]
     assert '/expense' in reply['text'] and reply['keyboard'] == menu.main_menu_keyboard()
@@ -57,8 +57,16 @@ async def test_cancel_button_is_the_cancel_command():
             return {'request_id': 'r1', 'revision': 3}
     workflow = Workflow()
     controller = BudgetController(Pending(), workflow, None, None, None, conversation=Conversation())
-    await controller.handle(message(text='✖️ Cancel'), NOW)
+    await controller.handle(message(text='/cancel'), NOW)
     assert workflow.calls == [('decide', 'owner-1', 'r1', 3, 'cancel')]
+
+
+def test_main_menu_is_the_six_requested_buttons():
+    assert [[b['text'] for b in row] for row in menu.main_menu_keyboard()['keyboard']] == [
+        ['💰 Balance', '📊 Spending'], ['➕ Add expense', '💵 Add income'], ['📅 Calendar', '❓ Help']]
+    assert menu.main_menu_keyboard()['is_persistent'] is True
+    assert menu.button_command('➕ Add expense') == 'entry:expense'
+    assert menu.button_command('💵 Add income') == 'entry:income'
 
 
 @pytest.mark.parametrize('text', ['Balance', '💰 balance', '💰 Balance please', 'spending'])

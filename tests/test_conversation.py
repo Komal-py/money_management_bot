@@ -381,7 +381,7 @@ async def test_real_sdk_outage_keeps_commands_reports_and_calendar_offline(store
             out = await route.dispatch(owner, None, RECEIVED, NOW, query=parsed['query'])
             assert out['text'] and 'unavailable' not in flat(out['text'])
         day = await route.dispatch(owner, None, RECEIVED, NOW, callback_data='day:2024-03-01')
-        assert 'No active expenses' in day['text'] and '/help' in route.menu()['text']
+        assert 'No active expenses' in day['text'] and 'type /' in route.menu()['text']
         parsed = parse_command('/expense 1 Travel Metro', RECEIVED, 'Asia/Kolkata')
         review = (await flow.submit(owner, parsed['actions'], RECEIVED))['review']
         assert store.get_snapshot(owner) == before

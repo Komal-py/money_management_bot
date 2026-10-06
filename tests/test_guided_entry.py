@@ -68,11 +68,13 @@ async def say(controller, text, update_id=1):
 
 
 @pytest.mark.asyncio
-async def test_menu_offers_guided_entry_buttons():
-    reply = await say(app(), '/start')
-    assert labels(reply)['Add expense'] == 'entry:expense'
-    assert labels(reply)['Add income'] == 'entry:income'
-    assert all(len(item['data'].encode()) <= 64 for row in reply['keyboard'] for item in row)
+async def test_menu_buttons_start_guided_entry():
+    # The persistent reply keyboard sends its label as text; ingress maps it to
+    # the guided entry (no inline callback data needed to begin).
+    reply = await say(app(), '➕ Add expense')
+    assert 'how much' in reply['text'].lower()
+    reply = await say(app(), '💵 Add income', update_id=2)
+    assert 'add income' in reply['text'].lower() and 'how much' in reply['text'].lower()
 
 
 @pytest.mark.asyncio
