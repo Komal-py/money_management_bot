@@ -4,6 +4,8 @@ import re
 from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
+from budget_bot.telegram.tables import table
+
 
 def _money(paise):
     # Domain formatting puts the minus after ₹; retain this view's established
@@ -35,9 +37,10 @@ def _bucket(snapshot, name):
 
 def _summary(result):
     lines = [f'Spending: {result["start"]} to {result["end"]}',
-             f'Total spent: {_money(result["total"])}', f'{result["count"]} expenses']
-    for bucket in sorted(result['by_bucket'], key=lambda name: (name.casefold(), name)):
-        lines.append(f'{bucket}: {_money(result["by_bucket"][bucket])}')
+             f'{result["count"]} expenses']
+    rows = [[f'{bucket}:', _money(result['by_bucket'][bucket])]
+            for bucket in sorted(result['by_bucket'], key=lambda name: (name.casefold(), name))]
+    lines.append(table(rows, footer=[['Total spent:', _money(result['total'])]]))
     if not result['count']:
         lines.append('No active expenses in this period.')
     return '\n'.join(lines)
@@ -49,18 +52,19 @@ class ReportService:
 
     def balances(self, owner_id):
         snapshot = self.store.get_snapshot(owner_id)
-        lines = ['Virtual INR balances', f'Unallocated pool: {_money(snapshot["pool"])}']
+        rows = [['Unallocated pool:', _money(snapshot['pool'])]]
+        warnings = []
         total = snapshot['pool']
         for name in sorted(snapshot['buckets'], key=lambda name: (name.casefold(), name)):
             bucket = snapshot['buckets'][name]
             total += bucket['balance']
-            lines.append(f'{name}: {_money(bucket["balance"])}')
+            rows.append([f'{name}:', _money(bucket['balance'])])
             if bucket['target'] is not None:
-                lines.append(f'  Monthly target: {_money(bucket["target"])}')
+                rows.append(['  Monthly target:', _money(bucket['target'])])
             if bucket['balance'] < 0:
-                lines.append(f'Warning: {name} has a negative balance.')
-        lines.append(f'Total available: {_money(total)}')
-        return '\n'.join(lines)
+                warnings.append(f'Warning: {name} has a negative balance.')
+        lines = ['Virtual INR balances', table(rows, footer=[['Total available:', _money(total)]])]
+        return '\n'.join(lines + warnings)
 
     def spending(self, owner_id, period, received_at, start=None, end=None, bucket_name=None):
         if received_at.tzinfo is None or received_at.utcoffset() is None:

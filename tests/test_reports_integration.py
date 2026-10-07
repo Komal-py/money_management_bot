@@ -11,6 +11,7 @@ from budget_bot.services.reports import ReportService
 from budget_bot.storage import BudgetStore
 from budget_bot.storage.models import Base
 from budget_bot.telegram.calendar import day_view, month_view, parse_callback
+from budget_bot.telegram.tables import flat, table_rows  # noqa: F401
 
 pytestmark = pytest.mark.postgres
 
@@ -96,25 +97,25 @@ def test_real_calendar_corrections_undo_owner_separation_and_read_only(db):
     other_before = db.get_snapshot(b)
     service = ReportService(db)
     pages = [day_view(db, a, '2024-03-01', page) for page in range(3)]
-    assert [v['text'].count(' | ') // 3 for v in pages] == [8, 8, 1]
+    assert [len(table_rows(v['text'], 'Bucket')) for v in pages] == [8, 8, 1]
     for view in pages:
-        assert 'Total spent: ₹0.17' in view['text']
+        assert 'Total spent: ₹0.17' in flat(view['text'])
         assert 'Other-owner-secret' not in view['text']
         assert 'To-correct' not in view['text'] and 'To-undo' not in view['text']
-    descriptions = [line.split(' | ')[-1] for v in pages for line in v['text'].splitlines() if ' | ' in line]
+    descriptions = [row.split(maxsplit=2)[2] for v in pages for row in table_rows(v['text'], 'Bucket')]
     assert sorted(descriptions) == [f'Fictional-{i:02d}' for i in range(17)]
     assert day_view(db, a, '2024-03-01') == pages[0]
-    assert 'Total spent: ₹0.99' in day_view(db, b, '2024-03-01')['text']
-    assert 'Corrected-fiction' in day_view(db, a, '2024-02-29')['text']
-    assert 'Total spent: ₹0.02' in service.day(a, '2024-02-29')
+    assert 'Total spent: ₹0.99' in flat(day_view(db, b, '2024-03-01')['text'])
+    assert any('Corrected-fiction' in r for r in table_rows(day_view(db, a, '2024-02-29')['text'], 'Bucket'))
+    assert 'Total spent: ₹0.02' in flat(service.day(a, '2024-02-29'))
     assert 'No active expenses' in service.day(a, '2024-03-02')
     assert 'Total spent: ₹0.17' in service.spending(a, 'month', receipt(3))
     assert 'Total spent: ₹0.19' in service.spending(
         a, 'week', datetime(2024, 3, 1, 12, tzinfo=timezone.utc))
     assert 'Total spent: ₹0.19' in service.spending(a, 'range', receipt(3), '2024-02-29', '2024-03-01')
     assert 'Total spent: ₹0.02' in service.spending(a, 'range', receipt(3), '2024-02-29', '2024-03-01', ' food ')
-    assert 'Travel: -₹0.01' in service.balances(a)
-    assert 'Total available: ₹9.81' in service.balances(a)
+    assert 'Travel: -₹0.01' in flat(service.balances(a))
+    assert 'Total available: ₹9.81' in flat(service.balances(a))
     for view in [*pages, month_view(2024, 2)]:
         for row in view['keyboard']:
             for button in row:

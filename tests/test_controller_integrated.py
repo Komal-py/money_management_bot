@@ -83,7 +83,7 @@ async def test_actual_invite_setup_menu_commands_calendar_and_offline_nl(db):
         saved = await confirm(app, actor, review)
         assert 'recorded' in saved[0]['text'].lower()
         menu = await app.handle(private(actor, '/start'), NOW)
-        assert 'virtual INR' in menu[0]['text'] and '/calendar' in menu[0]['text']
+        assert 'virtual INR' in menu[0]['text'] and 'type /' in menu[0]['text']
         assert app.conversation.__class__.__name__ == 'ConversationRouter'
         before = db.get_snapshot(owner)
         assert before['onboarded'] and before['pool'] == 6000
@@ -170,3 +170,29 @@ async def test_actual_controller_clarification_reopen_uses_original_month(db, mo
             assert db.get_pending(owner) is None and db.get_snapshot(owner) == baseline
     finally:
         await client.close()
+
+
+async def test_actual_menu_buttons_and_spending_period_picker_are_read_only(db):
+    from budget_bot.telegram.menu import main_menu_keyboard
+    admin_id, actor = identity(), identity()
+    invite = db.create_invite(db.ensure_admin(admin_id), NOW)
+    async with postgres_checkpointer(os.environ['BUDGET_TEST_DATABASE_URL'], schema='test_w6_workflow') as saver:
+        app = assembled(db, saver)
+        await app.handle(private(actor, '/start ' + invite), NOW)
+        owner = db.get_user(actor)['owner_id']
+        early = await app.handle(button(actor, 'sp:today'), NOW)
+        assert '/start' in early[0]['text'] and db.get_pending(owner) is None
+        await confirm(app, actor, await guided_setup(app, actor))
+        before = db.get_snapshot(owner)
+        menu = await app.handle(private(actor, '/start'), NOW)
+        assert menu[0]['keyboard'] == main_menu_keyboard()
+        assert '₹60.00' in (await app.handle(private(actor, '💰 Balance'), NOW))[0]['text']
+        entry = await app.handle(private(actor, '➕ Add expense'), NOW)
+        assert 'how much' in entry[0]['text'].lower()
+        await app.handle(private(actor, '/cancel'), NOW)
+        picker = await app.handle(private(actor, '📊 Spending'), NOW)
+        assert control(picker, 'This week') == 'sp:week'
+        report = await app.handle(button(actor, control(picker, 'This month')), NOW)
+        assert '₹0.00' in report[0]['text'] and control(report, 'Today') == 'sp:today'
+        assert (await app.handle(private(actor, '📅 Calendar'), NOW))[0]['text'] == 'October 2026'
+        assert db.get_snapshot(owner) == before and db.get_pending(owner) is None

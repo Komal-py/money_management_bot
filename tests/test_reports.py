@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from budget_bot.services.reports import ReportService, _money
+from budget_bot.telegram.tables import flat, table_rows  # noqa: F401
 
 
 class StoreDouble:
@@ -52,7 +53,7 @@ class StoreDouble:
 def test_balances_exact_sorted_targets_negative_and_no_mutations():
     store = StoreDouble()
     before = deepcopy(store.snapshot)
-    text = ReportService(store).balances('owner-a')
+    text = flat(ReportService(store).balances('owner-a'))
     assert 'Unallocated pool: ₹1.01' in text
     assert 'Food: ₹90071992547409.93' in text
     assert 'Travel: -₹0.01' in text
@@ -72,7 +73,7 @@ def test_balances_exact_sorted_targets_negative_and_no_mutations():
 def test_receipt_anchor_and_periods(period, start, end):
     store = StoreDouble()
     receipt = datetime(2024, 2, 29, 20, tzinfo=timezone.utc)
-    text = ReportService(store).spending('owner-a', period, receipt)
+    text = flat(ReportService(store).spending('owner-a', period, receipt))
     assert ('spending', 'owner-a', start, end, None) in store.calls
     assert 'Total spent: ₹3.00' in text
     assert '2 expenses' in text
@@ -83,12 +84,12 @@ def test_receipt_anchor_and_periods(period, start, end):
 def test_range_bucket_and_empty_day():
     store = StoreDouble()
     service = ReportService(store)
-    text = service.spending('owner-a', 'range', datetime(2024, 3, 2, tzinfo=timezone.utc),
-                            '2024-03-01', '2024-03-01', 'travel')
+    text = flat(service.spending('owner-a', 'range', datetime(2024, 3, 2, tzinfo=timezone.utc),
+                            '2024-03-01', '2024-03-01', 'travel'))
     assert 'Total spent: ₹2.01' in text
     assert ('spending', 'owner-a', date(2024, 3, 1), date(2024, 3, 1), 'Travel') in store.calls
-    assert 'No active expenses' in service.day('owner-a', '2024-02-29')
-    assert 'Total spent: ₹0.00' in service.day('owner-a', '2024-02-29')
+    assert 'No active expenses' in flat(service.day('owner-a', '2024-02-29'))
+    assert 'Total spent: ₹0.00' in flat(service.day('owner-a', '2024-02-29'))
 
 
 @pytest.mark.parametrize(('period', 'start', 'end', 'bucket'), [

@@ -6,6 +6,7 @@ import pytest
 
 from budget_bot.ai import render_balances, render_result, render_review
 from budget_bot.domain.planner import plan
+from budget_bot.telegram.tables import flat, table_rows  # noqa: F401
 
 NOW = datetime(2026, 10, 6, 20, tzinfo=timezone.utc)
 
@@ -27,7 +28,7 @@ def test_expense_review_exact_labels_local_date_projected_and_warnings():
     review = review_for([dict(type='expense', amount_inr='400.50', description='Metro',
                               bucket_name='Travel', date_expression='yesterday')])
     original = deepcopy(review)
-    text = render_review(review)
+    text = flat(render_review(review))
     for expected in ['Expense', 'Amount: INR 400.50', 'Description: Metro', 'Bucket: Travel',
                      'Date: 2026-10-06', 'Timezone: Asia/Kolkata', 'Projected balances',
                      'Travel: INR -300.50', 'Confirm', 'Edit', 'Cancel', '2026-10-07 02:00']:
@@ -36,7 +37,7 @@ def test_expense_review_exact_labels_local_date_projected_and_warnings():
         assert warning in text
     assert 'private-' not in text and 'None' not in text and 'null' not in text and '{' not in text
     assert review == original
-    assert render_review(review) == text
+    assert flat(render_review(review)) == text
 
 
 def test_ordered_directions_and_committed_remaining_balances():
@@ -46,13 +47,13 @@ def test_ordered_directions_and_committed_remaining_balances():
         dict(type='transfer', amount_inr='50', source_bucket='Food', destination_bucket='Travel'),
         dict(type='expense', amount_inr='10', bucket_name='Travel', description='Bus'),
     ])
-    text = render_review(review)
+    text = flat(render_review(review))
     assert text.index('1. Income') < text.index('2. Allocation') < text.index('3. Transfer') < text.index('4. Expense')
     for direction in ['New income → Pool', 'Pool → Travel', 'Food → Travel', 'Travel → Spending']:
         assert direction in text
     result = dict(status='committed', snapshot=review['plan']['snapshot'],
                   warnings=['A backend warning'], summary=review['plan']['summary'])
-    committed = render_result(result)
+    committed = flat(render_result(result))
     assert 'Recorded' in committed and 'Travel: INR 340.00' in committed
     assert 'A backend warning' in committed and 'Projected' not in committed
     assert 'None' not in committed and '{' not in committed
@@ -60,7 +61,7 @@ def test_ordered_directions_and_committed_remaining_balances():
 
 def test_balances_stable_order_and_no_internal_dump():
     state = snapshot()
-    text = render_balances(state)
+    text = flat(render_balances(state))
     assert 'Pool: INR 1000.00' in text
     assert text.index('Food: INR 500.00') < text.index('Travel: INR 100.00')
     assert 'Total virtual money: INR 1600.00' in text
@@ -74,8 +75,8 @@ def test_committed_result_labels_transaction_facts_without_unrelated_history():
     state = review['plan']['snapshot']
     batch = state['transactions'][0]['batch_id']
     state['transactions'].append(dict(state['transactions'][0], batch_id='unrelated-batch', description='Unrelated'))
-    text = render_result(dict(status='committed', batch_id=batch, snapshot=state,
-                              summary=review['plan']['summary'], warnings=review['plan']['warnings']))
+    text = flat(render_result(dict(status='committed', batch_id=batch, snapshot=state,
+                              summary=review['plan']['summary'], warnings=review['plan']['warnings'])))
     for expected in ['Description: Metro', 'Amount: INR 40.00', 'Bucket: Travel',
                      'Date: 2026-10-07', 'Direction: Travel → Spending']:
         assert expected in text
@@ -87,8 +88,8 @@ def test_committed_correction_resolves_backend_summary_reference_only():
     state = initial['plan']['snapshot']
     identifier = state['transactions'][0]['id']
     corrected = review_for([dict(type='correct', transaction_id=identifier, changes={'amount_inr': '35'})], state)
-    text = render_result(dict(status='committed', batch_id='new-correction-batch',
-                              snapshot=corrected['plan']['snapshot'], summary=corrected['plan']['summary'], warnings=[]))
+    text = flat(render_result(dict(status='committed', batch_id='new-correction-batch',
+                              snapshot=corrected['plan']['snapshot'], summary=corrected['plan']['summary'], warnings=[])))
     assert 'Description: Metro' in text and 'Amount: INR 35.00' in text
     assert identifier not in text
 
@@ -99,12 +100,12 @@ def test_correction_and_undo_show_human_facts_not_authority_ids():
     identifier = state['transactions'][0]['id']
     corrected = review_for([dict(type='correct', transaction_id=identifier,
                                 changes={'amount_inr': '35', 'bucket_name': 'Food'})], state)
-    text = render_review(corrected)
+    text = flat(render_review(corrected))
     for expected in ['Correction', 'Before', 'After', 'INR 40.00', 'INR 35.00', 'Travel', 'Food', 'Metro']:
         assert expected in text
     assert identifier not in text
     undone = review_for([dict(type='undo', transaction_id=identifier)], state)
-    text = render_review(undone)
+    text = flat(render_review(undone))
     assert 'Undo' in text and 'Spending → Travel' in text and 'INR 40.00' in text
     assert identifier not in text
 
@@ -117,7 +118,7 @@ def test_opening_bucket_and_target_metadata_render_without_null():
         dict(type='set_target', bucket_name='Travel', amount_inr='200'),
         dict(type='set_target', bucket_name='Travel', remove=True),
     ], state)
-    text = render_review(review)
+    text = flat(render_review(review))
     for expected in ['Opening money', 'INR 0.00', 'Create bucket', 'Travel', 'Monthly target', 'INR 200.00', 'off']:
         assert expected in text
     assert 'None' not in text and 'null' not in text
@@ -129,5 +130,5 @@ def test_noncommitted_result_never_claims_recorded(status, expected):
     if status == 'stale':
         result.update(review_for([dict(type='income', amount_inr='10', description='Gift')]))
         result['status'] = status
-    text = render_result(result)
+    text = flat(render_result(result))
     assert expected in text and 'Recorded' not in text

@@ -10,6 +10,7 @@ from budget_bot.ai import render_result, render_review
 from budget_bot.services.onboarding import OnboardingService
 from budget_bot.services.reports import ReportService
 from budget_bot.storage import BudgetStore
+from budget_bot.telegram.tables import flat
 from budget_bot.workflows import BudgetWorkflow, postgres_checkpointer
 from test_ai_provider import client_for, mutation, response
 from test_workflow import NOW, expense, onboard
@@ -47,7 +48,7 @@ async def test_setup_review_handoff_survives_postgres_graph_reopen(db):
         handoff = await flow.submit(owner, review['actions'], NOW, request_id=rid)
         assert handoff['review']['request_id'] == rid
         assert handoff['review']['plan'] == review['plan']
-        assert 'Pool: INR 50.00' in handoff['text']
+        assert 'Pool: INR 50.00' in flat(handoff['text'])
         assert db.get_snapshot(owner) == initial
     async with postgres_checkpointer(url, schema='test_w6_workflow') as saver:
         flow = rendered_workflow(db, saver=saver)

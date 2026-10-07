@@ -4,6 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from budget_bot.domain.money import format_money, parse_money
+from budget_bot.telegram.tables import table
 
 _LABELS = {'opening': 'Opening money', 'income': 'Income', 'allocate': 'Allocation',
            'transfer': 'Transfer', 'expense': 'Expense', 'create_bucket': 'Create bucket',
@@ -22,13 +23,14 @@ def _line(value):
 
 def _balances(snapshot, projected=False):
     lines = ['Projected balances (after confirmation):' if projected else 'Balances:',
-             f"Timezone: {_line(snapshot['timezone'])}", f"Pool: {_money(snapshot['pool'])}"]
+             f"Timezone: {_line(snapshot['timezone'])}"]
+    rows = [['Pool:', _money(snapshot['pool'])]]
     for name, bucket in sorted(snapshot['buckets'].items(), key=lambda pair: (pair[0].casefold(), pair[0])):
-        lines.append(f"Bucket { _line(name)}: {_money(bucket['balance'])}")
+        rows.append([f'{_line(name)}:', _money(bucket['balance'])])
         if bucket.get('target') is not None:
-            lines.append(f"  Monthly target: {_money(bucket['target'])}")
+            rows.append(['  Monthly target:', _money(bucket['target'])])
     total = snapshot['pool'] + sum(bucket['balance'] for bucket in snapshot['buckets'].values())
-    lines.append(f'Total virtual money: {_money(total)}')
+    lines.append(table(rows, footer=[['Total virtual money:', _money(total)]]))
     return lines
 
 
